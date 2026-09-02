@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="部屋干し養生">
-<title>部屋干し＆二十四節気・月齢 養生ナビ</title>
+<title>洗濯指数＆二十四節気・月齢 養生ナビ</title>
 <link rel="manifest" id="manifestLink">
 <link rel="apple-touch-icon" id="appleIcon">
 <style>
@@ -151,8 +151,8 @@
 </head>
 <body>
 <header>
-  <h1>🌿 部屋干し＆養生ナビ</h1>
-  <div class="sub">明日の部屋干し判断 × 二十四節気・月齢の東洋医学アドバイス</div>
+  <h1>🌿 洗濯指数＆養生ナビ</h1>
+  <div class="sub">明日の外干し判断 × 二十四節気・月齢の東洋医学アドバイス</div>
 </header>
 
 <div class="wrap">
@@ -190,9 +190,9 @@
     </div>
   </div>
 
-  <!-- 部屋干し -->
+  <!-- 洗濯指数 -->
   <div class="card">
-    <h2><span class="emoji">🧺</span> 明日の部屋干し判定</h2>
+    <h2><span class="emoji">🧺</span> 明日の洗濯指数</h2>
     <div id="dryLoading" class="loading">お天気データを取得中…</div>
     <div id="dryContent" class="hidden">
       <div class="meter-wrap">
@@ -336,10 +336,10 @@ function calcDryScore(w){
   return Math.round(rhScore*0.35+popScore*0.30+tScore*0.20+windScore*0.15);
 }
 function dryLabel(score){
-  if(score>=75) return "◎ 部屋干しOK！";
-  if(score>=55) return "○ 部屋干し ほぼOK";
-  if(score>=40) return "△ 部屋干し やや厳しい";
-  return "✕ 部屋干し 不向き";
+  if(score>=75) return "◎ 外干しOK！";
+  if(score>=55) return "○ 外干し ほぼOK";
+  if(score>=40) return "△ 外干し やや厳しい";
+  return "✕ 外干し 不向き";
 }
 function dryDesc(score, w){
   const parts=[];

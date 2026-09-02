@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#7a9e7e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="部屋干し養生">
+<meta name="apple-mobile-web-app-title" content="洗濯指数＆養生">
 <title>洗濯指数＆二十四節気・月齢 養生ナビ</title>
 <link rel="manifest" id="manifestLink">
 <link rel="apple-touch-icon" id="appleIcon">
@@ -115,16 +115,13 @@
   .q-opt:active{transform:scale(.96);}
   .q-opt.active{background:var(--green); color:#fff; border-color:var(--green);}
   /* 洗濯物 */
-  .laundry-tabs{display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;}
-  .laundry-tab{font-size:11px; padding:5px 9px; border-radius:999px; border:1px solid #d8d3c8; background:#fff; cursor:pointer; color:var(--ink); font-family:inherit; transition:all .15s;}
-  .laundry-tab:active{transform:scale(.96);}
-  .laundry-tab.active{background:var(--green); color:#fff; border-color:var(--green);}
-  .laundry-content{margin-top:10px; background:#fffbf2; border-radius:12px; padding:12px; border:1px solid #f0e6d2;}
-  .laundry-item-title{font-size:14px; font-weight:700; color:var(--green-dark); display:flex; align-items:center; gap:6px; margin-bottom:6px;}
-  .laundry-row{display:flex; justify-content:flex-start; align-items:flex-start; padding:7px 0; border-top:1px dashed #e8e2d6; gap:8px;}
-  .laundry-row:first-of-type{border-top:none; padding-top:2px;}
-  .laundry-row .k{font-size:11px; color:var(--soft); flex:0 0 65px; font-weight:700; padding-top:2px;}
-  .laundry-row .v{font-size:12px; flex:1; line-height:1.65;}
+  .idx-pairs{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;}
+  .idx-card{background:var(--green-light); border-radius:12px; padding:10px 6px; text-align:center;}
+  .idx-card .idx-day{font-size:10.5px; color:var(--soft); font-weight:700;}
+  .idx-card .idx-num{font-size:28px; font-weight:800; line-height:1.1; margin-top:2px;}
+  .idx-card .idx-rank{font-size:10.5px; font-weight:700; margin-top:2px;}
+  .idx-card.today{border:1.5px solid var(--green); background:#e2eddd;}
+  .idx-card.tomorrow{border:1.5px solid #e0d6c2; background:#fffbf2;}
   /* お気に入り */
   .fav-list{margin-top:6px;}
   .fav-item{background:#fffbf2; border:1px solid #f0e6d2; border-radius:12px; padding:10px 12px; margin-top:8px;}
@@ -152,7 +149,7 @@
 <body>
 <header>
   <h1>🌿 洗濯指数＆養生ナビ</h1>
-  <div class="sub">明日の外干し判断 × 二十四節気・月齢の東洋医学アドバイス</div>
+  <div class="sub">当日・翌日の洗濯指数 × 二十四節気・月齢の東洋医学アドバイス</div>
 </header>
 
 <div class="wrap">
@@ -190,27 +187,26 @@
     </div>
   </div>
 
-  <!-- 洗濯指数 -->
+  <!-- 洗濯指数（当日・翌日） -->
   <div class="card">
-    <h2><span class="emoji">🧺</span> 明日の洗濯指数</h2>
+    <h2><span class="emoji">🧺</span> 洗濯指数（当日・翌日）</h2>
     <div id="dryLoading" class="loading">お天気データを取得中…</div>
     <div id="dryContent" class="hidden">
-      <div class="meter-wrap">
-        <div class="score-big" id="dryScore">--</div>
-        <div class="score-label" id="dryLabel">--</div>
-        <div class="score-desc" id="dryDesc"></div>
-        <div class="bar"><div class="fill" id="dryBar" style="width:0%"></div></div>
-        <div class="scale"><span>☔ 乾きにくい</span><span>🌤 乾きやすい</span></div>
+      <div class="idx-pairs">
+        <div class="idx-card today">
+          <div class="idx-day">今日</div>
+          <div class="idx-num" id="dryScore0">--</div>
+          <div class="idx-rank" id="dryLabel0">--</div>
+        </div>
+        <div class="idx-card tomorrow">
+          <div class="idx-day">明日</div>
+          <div class="idx-num" id="dryScore1">--</div>
+          <div class="idx-rank" id="dryLabel1">--</div>
+        </div>
       </div>
-      <div class="weather-grid" id="weatherGrid"></div>
+      <div class="score-desc" id="dryDesc" style="margin-top:10px;"></div>
+      <div class="weather-grid weather-grid-twin" id="weatherGrid"></div>
     </div>
-  </div>
-
-  <!-- 洗濯物種類別 -->
-  <div class="card">
-    <h2><span class="emoji">👕</span> 洗濯物種類別アドバイス</h2>
-    <div class="laundry-tabs" id="laundryTabs"></div>
-    <div class="laundry-content" id="laundryContent"></div>
   </div>
 
   <!-- 月齢 -->
@@ -327,7 +323,9 @@ async function fetchWeather(lat, lon){
   return res.json();
 }
 
-function calcDryScore(w){
+/* 洗濯指数（0〜100、高いほど外に干せる／乾きやすい）
+   湿度35% / 降水確率30% / 気温20% / 風速15% */
+function calcWashIndex(w){
   const rh=w.relative_humidity_2m_mean, rhScore=Math.max(0,Math.min(100,(90-rh)*3.33+10));
   const pop=w.precipitation_probability_max, popScore=100-pop;
   const tAvg=(w.temperature_2m_max+w.temperature_2m_min)/2;
@@ -335,20 +333,32 @@ function calcDryScore(w){
   const wind=w.wind_speed_10m_max, windScore=Math.max(0,Math.min(100,wind*3+40));
   return Math.round(rhScore*0.35+popScore*0.30+tScore*0.20+windScore*0.15);
 }
-function dryLabel(score){
-  if(score>=75) return "◎ 外干しOK！";
-  if(score>=55) return "○ 外干し ほぼOK";
-  if(score>=40) return "△ 外干し やや厳しい";
-  return "✕ 外干し 不向き";
+function washLabel(score){
+  if(score>=75) return "◎ 洗濯日和";
+  if(score>=55) return "○ ほぼ乾く";
+  if(score>=40) return "△ 部屋干し向き";
+  return "✕ 外干し不向き";
 }
-function dryDesc(score, w){
-  const parts=[];
-  if(w.precipitation_probability_max>=50) parts.push("降水確率"+w.precipitation_probability_max+"%と高め");
-  if(w.relative_humidity_2m_mean>=80) parts.push("湿度"+w.relative_humidity_2m_mean+"%と湿っぽい");
-  if(w.relative_humidity_2m_mean<=60) parts.push("湿度"+w.relative_humidity_2m_mean+"%で乾燥しやすい");
-  if(w.wind_speed_10m_max>=10) parts.push("風"+w.wind_speed_10m_max+"km/hと風あり");
-  if(parts.length) return parts.join("。")+"。";
-  return "比較的乾きやすい条件です。";
+function washDesc(shorts, says, t0, t1, months){
+  const now = t0;
+  const tomorrow = t1;
+  // 残り時間アドバイス: 日本時間で時刻を指す
+  const hr = says.getHours();
+  let todaysNote = "";
+  if(hr >= 18) todaysNote = "（時間帯が遅いので、外干しするなら明日が確実です）";
+  else if(hr >= 15) todaysNote = "（あと数時間の日射で乾かすなら、薄手のもの向き）";
+  else todaysNote = "（日中いっぱい時間が使える日中です）";
+
+  const diff = shorts[1] - shorts[0];
+  let cmp = "";
+  if(diff >= 15) cmp = "明日は今日より指数が大きく上がる予報です。";
+  else if(diff <= -15) cmp = "明日は今日より指数が下がる予報です。";
+  else cmp = "明日は今日と同程度の条件です。";
+
+  const parts = [];
+  parts.push(`${months[0]}: 湿度${shorts[0].rh}%、降水確率${shorts[0].pop}%、気温${shorts[0].tmin}〜${shorts[0].tmax}℃${todaysNote}`);
+  parts.push(`${months[1]}: 湿度${shorts[1].rh}%、降水確率${shorts[1].pop}%、気温${shorts[1].tmin}〜${shorts[1].tmax}℃`);
+  return parts.join("／") + "。" + cmp;
 }
 
 /* ============================================================
@@ -431,38 +441,14 @@ const TRAIT_DEF = {
     cautions:"のぼせ・暑がりの方は量を控え、寝る直前は生姜を控えめに。" }
 };
 
-/* 体質セルフチェック用 質問（各分類3問・4段階リッカート） */
+/* 体質セルフチェック用 質問（各分類1問・4段階リッカート） */
 const CHECK_QUESTIONS = {
-  keistai: [
-    "胸やお腹の張りがよくある",
-    "些細なことでイライラしやすい",
-    "ため息が多い・気分的にもやもやする"
-  ],
-  shitsunetsu: [
-    "口の苦みや粘りを感じる",
-    "湿疹・吹き出物が出やすい",
-    "尿の色が濃い・体臭が気になる"
-  ],
-  tanshitsu: [
-    "体が重くだるい・頭がぼんやりする",
-    "食欲不振・胃もたれがち",
-    "痰が多い・舌に白い苔がつく"
-  ],
-  kiinkyo: [
-    "暑がりだが思ったほど汗が出ない",
-    "微熱・寝汗・口の渇きがある",
-    "動悸・息切れ・倦怠感"
-  ],
-  inkyo: [
-    "喉や口が乾く・肌がカサつく",
-    "空咳・手足のほてり・寝つきの悪さ",
-    "便がコロコロ・夕方微熱"
-  ],
-  yokyo: [
-    "手足が冷たい・寒がり",
-    "腰痛・頻尿・夜間尿",
-    "体が重く・顔色が白い"
-  ]
+  keistai:    "胸やお腹の張り、イライラ、ため息が多いなど、気の巡りの滞りを感じる",
+  shitsunetsu:"口の苦み・湿疹・尿の濃さなど、体の熱や湿感が気になる",
+  tanshitsu:  "体の重さ・胃もたれ・痰など、湿や痰が体に停滞している感じがある",
+  kiinkyo:    "微熱・寝汗・口の渇きなど、夏の終わりに体力や潤いが消耗している感じがある",
+  inkyo:      "喉の乾き・空咳・肌のカサつきなど、秋の乾燥で潤いが不足している",
+  yokyo:      "手足の冷え・腰痛・寒がりなど、冬の寒さで陽気が不足している"
 };
 
 const CHECK_OPTIONS = [
@@ -472,8 +458,26 @@ const CHECK_OPTIONS = [
   { label:"全く当てはまらない", score:0 }
 ];
 
-/* 体質セルフチェックの状態 */
-let checkAnswers = {}; // { traitKey: [s1,s2,s3] }
+const CHECK_KEY = "sekki_check_v1";
+
+/* 体質セルフチェックの状態: traitKey -> optionIndex (0〜3) または null */
+function loadCheckAnswers(){
+  try{
+    const raw = localStorage.getItem(CHECK_KEY);
+    if(!raw) return {};
+    const o = JSON.parse(raw);
+    return (o && typeof o === "object") ? o : {};
+  }catch(e){ return {}; }
+}
+function saveCheckAnswers(obj){
+  try{ localStorage.setItem(CHECK_KEY, JSON.stringify(obj)); }
+  catch(e){ console.warn("体質チェック保存失敗", e); }
+}
+function clearCheckAnswers(){
+  try{ localStorage.removeItem(CHECK_KEY); }catch(e){}
+}
+
+let checkAnswers = loadCheckAnswers(); // localStorage から復元
 let checkResultTraits = []; // チェック後に上位体質が入る
 
 function renderCheckQuestions(){
@@ -481,49 +485,63 @@ function renderCheckQuestions(){
   let html = "";
   Object.keys(CHECK_QUESTIONS).forEach((tk, gi) => {
     const trait = TRAIT_DEF[tk];
-    html += `<div class="q-block">`;
+    const q = CHECK_QUESTIONS[tk];
+    const ans = (checkAnswers[tk] !== undefined ? checkAnswers[tk] : -1);
+    const isAnswered = ans >= 0;
+    html += `<div class="q-block${isAnswered ? " is-answered" : ""}">`;
     html += `<div class="q-title">${gi+1}. ${trait.label} の傾向（${trait.season}）</div>`;
-    CHECK_QUESTIONS[tk].forEach((q, qi) => {
-      const ans = (checkAnswers[tk] && checkAnswers[tk][qi] !== undefined) ? checkAnswers[tk][qi] : -1;
-      html += `<div style="margin-top:6px;">
-        <div class="q-text">${escapeHtml(q)}</div>
-        <div class="q-options">`;
-      CHECK_OPTIONS.forEach((o, oi) => {
-        const active = ans===oi ? " active" : "";
-        html += `<button type="button" class="q-opt${active}" data-trait="${tk}" data-q="${qi}" data-opt="${oi}">${o.label}</button>`;
-      });
-      html += `</div></div>`;
+    html += `<div class="q-text">${escapeHtml(q)}</div>`;
+    html += `<div class="q-options">`;
+    CHECK_OPTIONS.forEach((o, oi) => {
+      const active = ans===oi ? " active" : "";
+      html += `<button type="button" class="q-opt${active}" data-trait="${tk}" data-opt="${oi}">${o.label}${active ? " ✓" : ""}</button>`;
     });
-    html += `</div>`;
+    html += `</div></div>`;
   });
+  // リセットボタン用スペースを確保
+  html += `<div style="margin-top:10px; text-align:right;"><button type="button" class="btn small ghost" id="clearCheckBtn">↶ 回答をリセット</button></div>`;
   container.innerHTML = html;
   container.querySelectorAll(".q-opt").forEach(btn => {
     btn.addEventListener("click", () => {
-      const tk = btn.dataset.trait, qi = +btn.dataset.qi, oi = +btn.dataset.opt;
-      if(!checkAnswers[tk]) checkAnswers[tk] = [];
-      checkAnswers[tk][qi] = oi;
+      const tk = btn.dataset.trait, oi = +btn.dataset.opt;
+      checkAnswers[tk] = oi;
+      saveCheckAnswers(checkAnswers); // 即座にlocalStorageへ保存
       renderCheckQuestions();
+      bindClearBtn();
     });
+  });
+  bindClearBtn();
+}
+
+function bindClearBtn(){
+  const b = document.getElementById("clearCheckBtn");
+  if(!b) return;
+  b.addEventListener("click", ()=>{
+    if(!confirm("体質セルフチェックの回答を全て消去しますか？")) return;
+    checkAnswers = {};
+    clearCheckAnswers();
+    checkResultTraits = [];
+    document.getElementById("checkResult").classList.add("hidden");
+    document.getElementById("genByCheckBtn").style.display = "none";
+    renderCheckQuestions();
   });
 }
 
 function runCheckDiagnosis(){
   const scores = {};
   Object.keys(CHECK_QUESTIONS).forEach(tk => {
-    const arr = checkAnswers[tk] || [];
-    if(arr.length < CHECK_QUESTIONS[tk].length){
-      scores[tk] = null; // 未回答
+    const v = checkAnswers[tk];
+    if(v === undefined || v === null){
+      scores[tk] = null;
     } else {
-      scores[tk] = arr.reduce((a,b)=>a+b, 0);
+      scores[tk] = CHECK_OPTIONS[v].score;
     }
   });
-  // 未回答チェック
   const unanswered = Object.entries(scores).filter(([_,v])=>v===null).map(([k])=>TRAIT_DEF[k].label);
   if(unanswered.length){
     alert("まだ回答していない質問があります: " + unanswered.join("・"));
     return;
   }
-  // スコア降順でソート
   const sorted = Object.entries(scores).sort((a,b)=>b[1]-a[1]);
   const top = sorted.slice(0,2).map(([k,v])=>({ key:k, score:v, label:TRAIT_DEF[k].label }));
   // 上位2つの差が3点以上なら単独、それ以内なら併記
@@ -538,8 +556,8 @@ function runCheckDiagnosis(){
   html += `<div class="check-result-score">`;
   sorted.forEach(([k,v]) => {
     const t = TRAIT_DEF[k];
-    const pct = Math.round(v / (CHECK_QUESTIONS[k].length*4) * 100);
-    html += `${t.label}: <strong>${v}点</strong>/12点（${pct}%）<br>`;
+    const pct = Math.round(v / 4 * 100);
+    html += `${t.label}: <strong>${v}点</strong>/4点（${pct}%）<br>`;
   });
   html += `</div>`;
   const mainTrait = TRAIT_DEF[checkResultTraits[0]];
@@ -793,12 +811,12 @@ function drawMoon(age){
   svg.innerHTML=html;
 }
 
-function renderWeather(w){
+function renderWeatherDual(wd0, wd1){
   document.getElementById("weatherGrid").innerHTML=`
-    <div class="w-item"><div class="k">降水確率</div><div class="v">${w.precipitation_probability_max}<small>%</small></div></div>
-    <div class="w-item"><div class="k">平均湿度</div><div class="v">${w.relative_humidity_2m_mean}<small>%</small></div></div>
-    <div class="w-item"><div class="k">気温</div><div class="v">${w.temperature_2m_min}〜${w.temperature_2m_max}<small>℃</small></div></div>
-    <div class="w-item"><div class="k">風速</div><div class="v">${w.wind_speed_10m_max}<small>km/h</small></div></div>`;
+    <div class="w-item"><div class="k">降水確率</div><div class="v" style="display:flex; justify-content:space-around; gap:6px;"><span>${wd0.precipitation_probability_max}<small>%</small></span><span style="color:var(--soft)">/</span><span>${wd1.precipitation_probability_max}<small>%</small></span></div><div style="font-size:9px; color:var(--soft); margin-top:2px;">今日 / 明日</div></div>
+    <div class="w-item"><div class="k">湿度</div><div class="v" style="display:flex; justify-content:space-around; gap:6px;"><span>${wd0.relative_humidity_2m_mean}<small>%</small></span><span style="color:var(--soft)">/</span><span>${wd1.relative_humidity_2m_mean}<small>%</small></span></div><div style="font-size:9px; color:var(--soft); margin-top:2px;">今日 / 明日</div></div>
+    <div class="w-item"><div class="k">気温</div><div class="v" style="font-size:12px;">${wd0.temperature_2m_min}〜${wd0.temperature_2m_max}℃<br><span style="color:var(--soft); font-size:12px;">${wd1.temperature_2m_min}〜${wd1.temperature_2m_max}℃</span></div></div>
+    <div class="w-item"><div class="k">風速</div><div class="v" style="display:flex; justify-content:space-around; gap:6px;"><span>${wd0.wind_speed_10m_max}<small>km</small></span><span style="color:var(--soft)">/</span><span>${wd1.wind_speed_10m_max}<small>km</small></span></div><div style="font-size:9px; color:var(--soft); margin-top:2px;">今日 / 明日</div></div>`;
 }
 
 function renderRecipeCard(r){
@@ -1081,39 +1099,7 @@ function renderFavoritesList(){
 }
 
 /* ============================================================
-   10. 洗濯物種類別
-   ============================================================ */
-const LAUNDRY_GUIDE = {
-  cotton_shirt: { emoji:"👕", name:"綿シャツ・ブラウス", drying:"形を整えハンガー干し。ボタンは留めて襟を伸ばす。直射日光は色褪せの原因になるため風通しの良い日陰が理想。", time:"約3〜5時間", tips:"脱水は短めでOK（しわ防止）。洗ったらすぐに振り、シワを伸ばしてから干すとアイロンが楽。", smell:"生乾き臭には『酢水（水200mlに酢大さじ1）』を霧吹きで全体に。再発予防に効果的です。" },
-  denim: { emoji:"👖", name:"デニム・ジーンズ", drying:"表裏返して物干し竿に二つ折り、または太めのハンガーにまたがせて。ポケットは外に出すと乾きやすい。", time:"約5〜8時間（厚みによる）", tips:"重さがあるため、風通しの良い場所で乾燥。色落ち防止に必ず裏返して。乾燥機は縮みのため避ける。", smell:"頑固な臭いは『重曹水（1Lに大さじ1）』に30分浸けてから通常洗い。乾いた後に天日干しすると更に◎。" },
-  towel: { emoji:"🧻", name:"タオル・ハンカチ", drying:"広げて竿に2つ折り、ピンチで端を留める。空気が当たる面を増やすのがコツ。密集させず間隔を空ける。", time:"約2〜4時間", tips:"洗濯直後にしっかり振り、繊維を立てると吸水性が復活。厚手のバスタオルはピンチを多めに。", smell:"ぬめり臭には『熱湯（80℃以上）』で5分消毒してから通常洗い。週1回の熱湯消毒でカビ予防。" },
-  knit: { emoji:"🧥", name:"厚手ニット・セーター", drying:"平干し（洗濯ネットや平干しスタンドに平置き）。ハンガー干し厳禁（伸びる）。", time:"約8〜12時間（厚みによる）", tips:"脱水は短めに。タオルに包んで押さえて水分を取る方法が効果的。形を整えてから陰干し。", smell:"部屋干しの臭いは『酢すすぎ』（最後のすすぎに酢大さじ2）。生乾き臭の予防に。" },
-  synthetic: { emoji:"🩳", name:"化繊・スポーツウェア", drying:"ハンガー干しOK。形を整えて日陰でも可。重ね着を避けるため間隔を広めに。", time:"約2〜3時間", tips:"熱に弱い素材が多い（乾燥機NG・アイロン低温）。風通しの良い場所で速乾。", smell:"汗の臭いは『重曹』（洗濯時に大さじ2投入）。皮脂汚れと臭いを同時に落とせます。" },
-  bedsheet: { emoji:"🛏️", name:"シーツ・敷きカバー", drying:"大きな物干し竿に半分に折り、風に合わせて途中で反転。角を合わせて干すと乾きやすい。", time:"約4〜6時間", tips:"洗濯ジワを伸ばすようにパンパンと振る。シーツクリップを使うと強風でも飛んでいかない。", smell:"湿気がこもりがちなので、必ず風通しの良い場所で。乾く前に取り込まないこと（カビ防止）。" },
-  kids: { emoji:"🧸", name:"子供服・保育園用品", drying:"小さなものはハンガーまたはピンチハンガーに密集させて。給食エプロンは形を整えて平干し。", time:"約3〜5時間", tips:"菌が気になる場合は『煮洗い』（鍋で10分煮る・綿素材のみ）。色ものは分けて。", smell:"食べこぼし臭には『重曹』（洗濯時に大さじ1）。食べこぼし汚れと臭いに効果的です。" }
-};
-let currentLaundryKey = "cotton_shirt";
-function renderLaundryTabs(){
-  const tabs=document.getElementById("laundryTabs");
-  tabs.innerHTML=Object.entries(LAUNDRY_GUIDE).map(([k,v])=>
-    `<button type="button" class="laundry-tab${k===currentLaundryKey?" active":""}" data-key="${k}">${v.emoji} ${v.name.split("・")[0]}</button>`
-  ).join("");
-  tabs.querySelectorAll(".laundry-tab").forEach(btn=>{
-    btn.addEventListener("click",()=>{ currentLaundryKey=btn.dataset.key; renderLaundryTabs(); renderLaundryContent(); });
-  });
-}
-function renderLaundryContent(){
-  const item=LAUNDRY_GUIDE[currentLaundryKey];
-  document.getElementById("laundryContent").innerHTML=`
-    <div class="laundry-item-title">${item.emoji} ${item.name}</div>
-    <div class="laundry-row"><div class="k">干し方</div><div class="v">${item.drying}</div></div>
-    <div class="laundry-row"><div class="k">所要時間</div><div class="v">${item.time}</div></div>
-    <div class="laundry-row"><div class="k">ポイント</div><div class="v">${item.tips}</div></div>
-    <div class="laundry-row"><div class="k">臭い対策</div><div class="v">${item.smell}</div></div>`;
-}
-
-/* ============================================================
-   11. 位置情報のUI更新
+   10. 位置情報のUI更新
    ============================================================ */
 function setLocUI(loc, status){
   document.getElementById("placeName").textContent="📍 "+loc.name;
@@ -1136,8 +1122,6 @@ async function main(){
   document.getElementById("todayLabel").textContent = today.getFullYear()+"年"+(today.getMonth()+1)+"月"+today.getDate()+"日";
   renderMoon(today);
   renderSekkiAndTraits(today);
-  renderLaundryTabs();
-  renderLaundryContent();
   renderCheckQuestions();
   renderFavoritesList();
 
@@ -1154,25 +1138,39 @@ async function updateWeather(){
   try{
     const data = await fetchWeather(currentLoc.lat, currentLoc.lon);
     const w = data.daily;
-    const idx = 1;
-    const wd = {
-      temperature_2m_max: w.temperature_2m_max[idx],
-      temperature_2m_min: w.temperature_2m_min[idx],
-      relative_humidity_2m_mean: w.relative_humidity_2m_mean[idx],
-      precipitation_probability_max: w.precipitation_probability_max[idx],
-      wind_speed_10m_max: w.wind_speed_10m_max[idx]
+    const wd0 = {
+      temperature_2m_max: w.temperature_2m_max[0],
+      temperature_2m_min: w.temperature_2m_min[0],
+      relative_humidity_2m_mean: w.relative_humidity_2m_mean[0],
+      precipitation_probability_max: w.precipitation_probability_max[0],
+      wind_speed_10m_max: w.wind_speed_10m_max[0]
     };
-    const score = calcDryScore(wd);
-    document.getElementById("dryScore").textContent = score;
-    document.getElementById("dryLabel").textContent = dryLabel(score);
-    document.getElementById("dryDesc").textContent = dryDesc(score, wd);
-    document.getElementById("dryBar").style.width = score + "%";
-    document.getElementById("dryBar").style.background =
-      score >= 75 ? "linear-gradient(90deg,#7fbf7f,#4e9e5e)" :
-      score >= 55 ? "linear-gradient(90deg,#bfd98a,#8fbf5e)" :
-      score >= 40 ? "linear-gradient(90deg,#e8c96a,#d9a83e)" :
-      "linear-gradient(90deg,#d98a8a,#c05e5e)";
-    renderWeather(wd);
+    const wd1 = {
+      temperature_2m_max: w.temperature_2m_max[1],
+      temperature_2m_min: w.temperature_2m_min[1],
+      relative_humidity_2m_mean: w.relative_humidity_2m_mean[1],
+      precipitation_probability_max: w.precipitation_probability_max[1],
+      wind_speed_10m_max: w.wind_speed_10m_max[1]
+    };
+    const s0 = calcWashIndex(wd0), s1 = calcWashIndex(wd1);
+    // 配色をつける
+    function fillFor(el, score){
+      el.textContent = score;
+      el.style.color = score>=75?"#3a7d4a":score>=55?"#6a9a3a":score>=40?"#a07820":"#b04545";
+    }
+    fillFor(document.getElementById("dryScore0"), s0);
+    fillFor(document.getElementById("dryScore1"), s1);
+    document.getElementById("dryLabel0").textContent = washLabel(s0);
+    document.getElementById("dryLabel1").textContent = washLabel(s1);
+    // 説明文（時刻で残り時間アドバイスが変わる）
+    const todayDate = new Date();
+    const dateLabel = (idx)=> {
+      const d = new Date(todayDate);
+      d.setDate(d.getDate() + idx);
+      return (d.getMonth()+1) + "月" + d.getDate() + "日";
+    };
+    document.getElementById("dryDesc").textContent = washDesc([wd0,wd1], todayDate, todayDate, new Date(todayDate.getTime()+86400000), [dateLabel(0), dateLabel(1)]);
+    renderWeatherDual(wd0, wd1);
     document.getElementById("dryLoading").classList.add("hidden");
     document.getElementById("dryContent").classList.remove("hidden");
     document.getElementById("locError").classList.add("hidden");
@@ -1252,7 +1250,7 @@ document.getElementById("regenBtn").addEventListener("click", ()=>{
     const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192"><rect width="192" height="192" rx="42" fill="#7a9e7e"/><text x="96" y="118" font-size="88" text-anchor="middle">🧺</text></svg>`;
     const iconUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(iconSvg)));
     const manifest = {
-      name:"部屋干し＆養生ナビ", short_name:"部屋干し養生",
+      name:"洗濯指数＆養生ナビ", short_name:"洗濯指数養生",
       start_url:"./index.html", display:"standalone", background_color:"#eef4ee",
       theme_color:"#7a9e7e",
       icons:[{src:iconUrl, sizes:"192x192", type:"image/svg+xml"}]

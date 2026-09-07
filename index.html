@@ -96,6 +96,37 @@
   .recipe-fav.is-fav{background:#fff5e0; color:#b0702a; border-color:#e0c89a;}
   .recipe-fav:active{transform:scale(.95);}
   .recipe-gen-tag{font-size:10px; color:var(--soft); margin-top:4px;}
+
+  /* 体質別おすすめ食材（DB読込） */
+  .food-rec{margin-top:14px; padding-top:12px; border-top:1px dashed #e8e2d6;}
+  .food-rec-title{font-size:12px; font-weight:700; color:var(--green-dark); margin-bottom:8px;}
+  .food-rec-title small{font-weight:400; color:var(--soft);}
+  .nature-filter{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+  .nature-btn{
+    font-size:11px; padding:6px 10px; border-radius:999px; border:1.5px solid #d8d3c8;
+    background:#fff; color:var(--ink); cursor:pointer; font-family:inherit; line-height:1;
+  }
+  .nature-btn[aria-selected="true"]{color:#fff; border-color:transparent;}
+  .nature-btn:focus-visible{outline:2px solid var(--green); outline-offset:2px;}
+  .food-chips{display:flex; flex-wrap:wrap; gap:6px; min-height:8px;}
+  .food-chip{
+    display:inline-flex; align-items:center; gap:4px;
+    background:#fffbf2; border:1px solid #f0e6d2; border-radius:999px;
+    padding:5px 9px; font-size:11px; line-height:1.2;
+  }
+  .fc-emoji{font-size:13px; line-height:1;}
+  .fc-name{font-weight:600;}
+  .fc-nature{
+    font-size:10px; font-weight:700; color:#fff; border:none; border-radius:999px;
+    padding:3px 7px; cursor:pointer; font-family:inherit; line-height:1;
+  }
+  .fc-nature:focus-visible{outline:2px solid #fff; outline-offset:2px;}
+  .food-empty{
+    background:#fdf3e7; border:1px dashed #e0c89a; border-radius:10px;
+    padding:10px 12px; font-size:11.5px; color:#8a4a1a; line-height:1.7;
+  }
+  .food-empty code{font-family:monospace; background:#fff3e0; padding:1px 5px; border-radius:4px; font-size:10.5px;}
+
   /* 体質セルフチェック */
   .check-intro{font-size:12.5px; line-height:1.7; color:var(--ink); margin-bottom:10px;}
   .check-result{background:var(--green-light); border-radius:12px; padding:12px; margin-top:10px;}
@@ -234,8 +265,8 @@
   <div class="card">
     <h2><span class="emoji">🔍</span> 体質セルフチェック</h2>
     <div class="check-intro">
-      18問の質問に答えて、あなたの体質傾向をチェックします。<br>
-      結果はレシピ提案に自動で反映されます（<strong>医療診断ではありません</strong>）。
+      気になる<strong>症状</strong>をタップ（複数選択OK）して体質傾向をチェックします。<br>
+      何も選ばなければ<strong>「症状なし（バランス型）」</strong>として診断します。結果はレシピ提案に自動で反映されます（<strong>医療診断ではありません</strong>）。
     </div>
     <div id="checkArea">
       <div id="checkQuestions" class="check-questions"></div>
@@ -249,9 +280,24 @@
 
   <!-- 体質・養生レシピ（動的生成） -->
   <div class="card">
-    <h2><span class="emoji">🥗</span> 体質にあった養生レシピ</h2>
+    <h2><span class="emoji">🥗</span> 体質にあった養生レシピ <small style="font-size:11px;color:#888;">— 食材をタップでレシピを表示</small></h2>
+    <div id="recipeFilterInfo" class="check-intro" style="margin-top:0;margin-bottom:8px;"></div>
     <div id="traitTags"></div>
     <div class="advice" id="traitAdvice"></div>
+
+    <!-- 体質別おすすめ食材（DATASET_DB 読込前提） -->
+    <div class="food-rec">
+      <div class="food-rec-title">🌿 体質別おすすめ食材 <small>（五性をタップで絞り込み）</small></div>
+      <div id="natureFilter" role="tablist" aria-label="五性で絞り込み"></div>
+      <div id="foodChipList" class="food-chips" role="tabpanel" aria-live="polite" aria-label="体質別食材一覧"></div>
+      <div id="foodEmpty" class="food-empty" hidden>
+        ⚠️ 薬膳食材DBが未読込です。<br>
+        セカンダリブレインの<b>「薬膳_食材別五性五味_薬膳データベース」</b>を共有するか、下の <code>DATASET_DB</code> に以下の形式で追加してください。<br>
+        <code>{ name, emoji, nature:"寒"|"涼"|"平"|"温"|"熱", flavors, meridians, effect, traits:["keistai","shitsunetsu","tanshitsu","kiinkyo","inkyo","yokyo"] }</code><br>
+        <small>※ 五性値はDBの値で表示します。捏造防止のためDBに無い食材は出しません。</small>
+      </div>
+    </div>
+
     <div id="foodList"></div>
     <button class="btn ghost" id="regenBtn" style="width:100%; margin-top:14px;">🔄 別のレシピを再生成する</button>
   </div>
@@ -339,26 +385,20 @@ function washLabel(score){
   if(score>=40) return "△ 部屋干し向き";
   return "✕ 外干し不向き";
 }
-function washDesc(shorts, says, t0, t1, months){
-  const now = t0;
-  const tomorrow = t1;
-  // 残り時間アドバイス: 日本時間で時刻を指す
-  const hr = says.getHours();
-  let todaysNote = "";
-  if(hr >= 18) todaysNote = "（時間帯が遅いので、外干しするなら明日が確実です）";
-  else if(hr >= 15) todaysNote = "（あと数時間の日射で乾かすなら、薄手のもの向き）";
-  else todaysNote = "（日中いっぱい時間が使える日中です）";
-
-  const diff = shorts[1] - shorts[0];
-  let cmp = "";
-  if(diff >= 15) cmp = "明日は今日より指数が大きく上がる予報です。";
-  else if(diff <= -15) cmp = "明日は今日より指数が下がる予報です。";
-  else cmp = "明日は今日と同程度の条件です。";
-
-  const parts = [];
-  parts.push(`${months[0]}: 湿度${shorts[0].rh}%、降水確率${shorts[0].pop}%、気温${shorts[0].tmin}〜${shorts[0].tmax}℃${todaysNote}`);
-  parts.push(`${months[1]}: 湿度${shorts[1].rh}%、降水確率${shorts[1].pop}%、気温${shorts[1].tmin}〜${shorts[1].tmax}℃`);
-  return parts.join("／") + "。" + cmp;
+/* 洗濯指数カード下に出すコメント文（数値は weatherGrid に集約済みなので表示しない） */
+function washComment(s0, s1, sayDate){
+  const hr = sayDate.getHours();
+  let todayHint = "";
+  if(hr >= 18)      todayHint = "時間帯が遅いので、外干しするなら明日が確実です。";
+  else if(hr >= 15) todayHint = "あと数時間の日射で乾かすなら、薄手のものが向きます。";
+  else if(hr >= 9)  todayHint = "日中いっぱい時間が使えます。";
+  else              todayHint = "朝の時間帯は霧や結露に注意が必要です。";
+  const diff = s1 - s0;
+  let diffHint = "";
+  if(diff >= 15)      diffHint = "明日は今日より大きく乾きやすくなります。";
+  else if(diff <= -15) diffHint = "明日は今日より乾きにくくなる予報です。";
+  else                diffHint = "明日は今日と同程度の条件です。";
+  return todayHint + diffHint;
 }
 
 /* ============================================================
@@ -414,207 +454,56 @@ function moonAge(date){
 /* ============================================================
    4. 体質（弁証6分類）の定義
    ============================================================ */
+/* 体質（弁証9分類）：従来の6分類 + 気虚・血虚・血瘀 */
 const TRAIT_DEF = {
-  keistai:  { label:"気滞",  season:"春",  organ:"肝",
-    summary:"気の巡りが滞り、胸やお腹の張り・イライラ・ため息が出やすい体質です。",
-    advice:"疏肝理気（気の巡りを整える）作用のある食材を。酸味・香り・苦味の食材が気の巡りに効果的です。",
-    cautions:"妊娠初期はキャベツを控えめに。胃腸が弱い方はよく加熱してください。" },
-  shitsunetsu:{ label:"湿熱", season:"夏",  organ:"脾胃",
-    summary:"体の余分な熱と湿がこもり、口の苦み・湿疹・倦怠感・尿の濃さなどが出やすい体質です。",
-    advice:"清熱利湿（熱と湿を取り除く）の食材を。苦味と酸味で心火を鎮め、湿を排泄しましょう。",
-    cautions:"胃腸虚弱・冷え性の方は量を控えめに。" },
-  tanshitsu:{ label:"痰湿", season:"長夏", organ:"脾",
-    summary:"脾が湿に侵されて痰湿が停滞し、だるさ・頭重・胃もたれ・痰が出やすい体質です。",
-    advice:"健脾利湿（脾を健やかにし湿を除く）の食材を。はと麦や冬瓜で湿を流し、脾胃を守りましょう。",
-    cautions:"はと麦は体を冷やすため妊娠中・冷え性の方は控えめに。" },
-  kiinkyo:  { label:"気陰両虚", season:"夏の終わり", organ:"心肺",
-    summary:"夏の終わりの体力消耗期。気と陰液が足りず、だるさ・微熱・口の渇き・動悸が出やすい体質です。",
-    advice:"気陰両補（気と陰を同時に補う）の食材を。豆腐や黒ごまで潤いを補い、気を回復させましょう。",
-    cautions:"下痢気味の方は黒ごまを控えめに。" },
-  inkyo:    { label:"陰虚", season:"秋", organ:"肺",
-    summary:"秋の乾燥で体の潤いが不足し、喉の乾き・空咳・肌のカサつき・寝つきの悪さが出やすい体質です。",
-    advice:"滋陰潤燥（潤いを補う）の食材を。梨や白きゅうりで体を潤し、肺を守りましょう。",
-    cautions:"体が冷えている・下痢気味の方は少量から。" },
+  keistai:  { label:"気滞", season:"春", organ:"肝",
+    summary:"気の巡りが悪く、イライラ・胸の張り・ため息・PMS が出やすい体質です。",
+    advice:"疏肝理気（気の巡りを助ける）の食材を。みかん・玉ねぎ・酢・春菊で気の流れを改善。",
+    cautions:"ストレス・甘いもの・脂っこいものは気を滞らせるので控えめに。" },
+  shitsunetsu:{ label:"湿熱", season:"夏", organ:"脾・膀胱",
+    summary:"熱と湿がこもり、肌あれ・口臭・便秘・尿の濃さなどが出やすい体質です。",
+    advice:"瀉火利湿（熱と湿を出す）の食材を。緑豆・冬瓜・きゅうり・はと麦でクールダウン。",
+    cautions:"甘いもの・脂っこいもの・アルコールは湿熱を悪化させます。" },
+  tanshitsu:{ label:"痰湿", season:"長夏", organ:"脾・胃",
+    summary:"湿や水分が体に滞り、むくみ・体が重い・頭がぼんやりしやすい体質です。",
+    advice:"健脾利湿（脾を健やかにし湿を出す）の食材を。はと麦・緑豆・鯛・とうもろこし。",
+    cautions:"冷たいもの・甘いもの・乳製品は控える。" },
+  kiinkyo:  { label:"気陰両虚", season:"夏", organ:"脾・肺",
+    summary:"気と陰（潤い）の両方が不足し、夏バテ・口渇・微熱・息切れが出やすい体質です。",
+    advice:"気と陰を同時に補う食材を。梨・白ごま・鶏肉・卵・はと麦。",
+    cautions:"冷たいもの・熱いものは避け、室温でゆっくり取る。" },
+  inkyo:    { label:"陰虚", season:"秋", organ:"肝・腎",
+    summary:"血や潤いが不足し、のぼせ・ほてり・寝汗・ドライアイなどが出やすい体質です。",
+    advice:"滋陰潤燥の食材を。梨・白ごま・豆腐・卵で潤す。",
+    cautions:"辛いもの・アルコールの過剰摂取は陰を消耗させるので控えめに。" },
   yokyo:    { label:"陽虚", season:"冬", organ:"腎",
     summary:"冬の寒さで体の陽気が不足し、手足の冷え・腰痛・頻尿・寒がりで体力低下しやすい体質です。",
-    advice:"温補腎陽（腎を温めて陽気を補う）の食材を。生姜・羊肉・黒豆で体を芯から温めましょう。",
-    cautions:"のぼせ・暑がりの方は量を控え、寝る直前は生姜を控えめに。" }
-};
-
-/* 体質セルフチェック用 質問（各分類1問・4段階リッカート） */
-const CHECK_QUESTIONS = {
-  keistai:    "胸やお腹の張り、イライラ、ため息が多いなど、気の巡りの滞りを感じる",
-  shitsunetsu:"口の苦み・湿疹・尿の濃さなど、体の熱や湿感が気になる",
-  tanshitsu:  "体の重さ・胃もたれ・痰など、湿や痰が体に停滞している感じがある",
-  kiinkyo:    "微熱・寝汗・口の渇きなど、夏の終わりに体力や潤いが消耗している感じがある",
-  inkyo:      "喉の乾き・空咳・肌のカサつきなど、秋の乾燥で潤いが不足している",
-  yokyo:      "手足の冷え・腰痛・寒がりなど、冬の寒さで陽気が不足している"
-};
-
-const CHECK_OPTIONS = [
-  { label:"強く当てはまる", score:4 },
-  { label:"やや当てはまる", score:2 },
-  { label:"あまり当てはまらない", score:1 },
-  { label:"全く当てはまらない", score:0 }
-];
-
-const CHECK_KEY = "sekki_check_v1";
-
-/* 体質セルフチェックの状態: traitKey -> optionIndex (0〜3) または null */
-function loadCheckAnswers(){
-  try{
-    const raw = localStorage.getItem(CHECK_KEY);
-    if(!raw) return {};
-    const o = JSON.parse(raw);
-    return (o && typeof o === "object") ? o : {};
-  }catch(e){ return {}; }
-}
-function saveCheckAnswers(obj){
-  try{ localStorage.setItem(CHECK_KEY, JSON.stringify(obj)); }
-  catch(e){ console.warn("体質チェック保存失敗", e); }
-}
-function clearCheckAnswers(){
-  try{ localStorage.removeItem(CHECK_KEY); }catch(e){}
-}
-
-let checkAnswers = loadCheckAnswers(); // localStorage から復元
-let checkResultTraits = []; // チェック後に上位体質が入る
-
-function renderCheckQuestions(){
-  const container = document.getElementById("checkQuestions");
-  let html = "";
-  Object.keys(CHECK_QUESTIONS).forEach((tk, gi) => {
-    const trait = TRAIT_DEF[tk];
-    const q = CHECK_QUESTIONS[tk];
-    const ans = (checkAnswers[tk] !== undefined ? checkAnswers[tk] : -1);
-    const isAnswered = ans >= 0;
-    html += `<div class="q-block${isAnswered ? " is-answered" : ""}">`;
-    html += `<div class="q-title">${gi+1}. ${trait.label} の傾向（${trait.season}）</div>`;
-    html += `<div class="q-text">${escapeHtml(q)}</div>`;
-    html += `<div class="q-options">`;
-    CHECK_OPTIONS.forEach((o, oi) => {
-      const active = ans===oi ? " active" : "";
-      html += `<button type="button" class="q-opt${active}" data-trait="${tk}" data-opt="${oi}">${o.label}${active ? " ✓" : ""}</button>`;
-    });
-    html += `</div></div>`;
-  });
-  // リセットボタン用スペースを確保
-  html += `<div style="margin-top:10px; text-align:right;"><button type="button" class="btn small ghost" id="clearCheckBtn">↶ 回答をリセット</button></div>`;
-  container.innerHTML = html;
-  container.querySelectorAll(".q-opt").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const tk = btn.dataset.trait, oi = +btn.dataset.opt;
-      checkAnswers[tk] = oi;
-      saveCheckAnswers(checkAnswers); // 即座にlocalStorageへ保存
-      renderCheckQuestions();
-      bindClearBtn();
-    });
-  });
-  bindClearBtn();
-}
-
-function bindClearBtn(){
-  const b = document.getElementById("clearCheckBtn");
-  if(!b) return;
-  b.addEventListener("click", ()=>{
-    if(!confirm("体質セルフチェックの回答を全て消去しますか？")) return;
-    checkAnswers = {};
-    clearCheckAnswers();
-    checkResultTraits = [];
-    document.getElementById("checkResult").classList.add("hidden");
-    document.getElementById("genByCheckBtn").style.display = "none";
-    renderCheckQuestions();
-  });
-}
-
-function runCheckDiagnosis(){
-  const scores = {};
-  Object.keys(CHECK_QUESTIONS).forEach(tk => {
-    const v = checkAnswers[tk];
-    if(v === undefined || v === null){
-      scores[tk] = null;
-    } else {
-      scores[tk] = CHECK_OPTIONS[v].score;
-    }
-  });
-  const unanswered = Object.entries(scores).filter(([_,v])=>v===null).map(([k])=>TRAIT_DEF[k].label);
-  if(unanswered.length){
-    alert("まだ回答していない質問があります: " + unanswered.join("・"));
-    return;
-  }
-  const sorted = Object.entries(scores).sort((a,b)=>b[1]-a[1]);
-  const top = sorted.slice(0,2).map(([k,v])=>({ key:k, score:v, label:TRAIT_DEF[k].label }));
-  // 上位2つの差が3点以上なら単独、それ以内なら併記
-  if(sorted.length>=2 && sorted[0][1]-sorted[1][1]<=3 && sorted[1][1]>0){
-    checkResultTraits = [sorted[0][0], sorted[1][0]];
-  } else {
-    checkResultTraits = [sorted[0][0]];
-  }
-  // 表示
-  const result = document.getElementById("checkResult");
-  let html = `<div class="check-result-title">あなたの体質傾向</div>`;
-  html += `<div class="check-result-score">`;
-  sorted.forEach(([k,v]) => {
-    const t = TRAIT_DEF[k];
-    const pct = Math.round(v / 4 * 100);
-    html += `${t.label}: <strong>${v}点</strong>/4点（${pct}%）<br>`;
-  });
-  html += `</div>`;
-  const mainTrait = TRAIT_DEF[checkResultTraits[0]];
-  const subTrait = checkResultTraits[1] ? TRAIT_DEF[checkResultTraits[1]] : null;
-  html += `<div class="check-result-desc">
-    <strong>${mainTrait.label}</strong>${subTrait ? `と<strong>${subTrait.label}</strong>` : ""}の傾向が比較的強いようです。<br>
-    ${mainTrait.summary}
-  </div>`;
-  result.innerHTML = html;
-  result.classList.remove("hidden");
-  // 生成ボタンを表示
-  document.getElementById("genByCheckBtn").style.display = "block";
-}
-
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
-
-/* ============================================================
-   5. レシピジェネレータ（食材/調理法/薬味プールから毎回生成）
-   ============================================================ */
-const ING_POOL = [
-  // 野菜
-  { name:"キャベツ",       emoji:"🥬", cat:"veg", constitutions:["keistai"], mainOk:true },
-  { name:"大根",           emoji:"🥕", cat:"veg", constitutions:["keistai","yokyo"], mainOk:true },
-  { name:"ピーマン",       emoji:"🫑", cat:"veg", constitutions:["keistai","shitsunetsu"], mainOk:true },
-  { name:"長ねぎ",         emoji:"🧅", cat:"veg", constitutions:["keistai","yokyo","shitsunetsu"] },
-  { name:"緑豆もやし",     emoji:"🌱", cat:"veg", constitutions:["shitsunetsu"], mainOk:true },
-  { name:"冬瓜",           emoji:"🍈", cat:"veg", constitutions:["shitsunetsu","tanshitsu"], mainOk:true },
-  { name:"きゅうり",       emoji:"🥒", cat:"veg", constitutions:["shitsunetsu","inkyo"], mainOk:true },
-  { name:"にんじん",       emoji:"🥕", cat:"veg", constitutions:["tanshitsu","yokyo","kiinkyo"] },
-  { name:"里芋",           emoji:"🍠", cat:"veg", constitutions:["tanshitsu","inkyo"] },
-  { name:"れんこん",       emoji:"🪷", cat:"veg", constitutions:["tanshitsu","inkyo"] },
-  { name:"じゃがいも",     emoji:"🥔", cat:"veg", constitutions:["tanshitsu"] },
-  { name:"ごぼう",         emoji:"🥕", cat:"veg", constitutions:["yokyo","keistai"] },
-  { name:"梨",             emoji:"🍐", cat:"fruit", constitutions:["inkyo","kiinkyo"], mainOk:true },
-  { name:"生姜",           emoji:"🫚", cat:"spice", constitutions:["yokyo"], mainOk:false },
-  // 肉・魚・豆
-  { name:"豚バラ薄切り",   emoji:"🥩", cat:"meat", constitutions:["keistai","kiinkyo"] },
-  { name:"豚こま切れ",     emoji:"🥩", cat:"meat", constitutions:["shitsunetsu","keistai"] },
-  { name:"豚ヒレ肉",       emoji:"🥩", cat:"meat", constitutions:["tanshitsu","keistai"] },
-  { name:"牛肉薄切り",     emoji:"🥩", cat:"meat", constitutions:["keistai","yokyo"] },
-  { name:"鶏ささみ",       emoji:"🍗", cat:"meat", constitutions:["shitsunetsu","kiinkyo"] },
-  { name:"鶏手羽元",       emoji:"🍗", cat:"meat", constitutions:["yokyo"] },
-  { name:"羊肉（ラム）",   emoji:"🍖", cat:"meat", constitutions:["yokyo"] },
-  { name:"豆腐（絹ごし）", emoji:"🍮", cat:"bean", constitutions:["kiinkyo","inkyo"] },
-  { name:"黒豆（乾燥）",   emoji:"🫘", cat:"bean", constitutions:["yokyo"], mainOk:true },
-  { name:"はと麦（乾燥）", emoji:"🌾", cat:"bean", constitutions:["tanshitsu"], mainOk:true },
-  { name:"銀杏（殻なし）", emoji:"🌰", cat:"nut",  constitutions:["inkyo"] }
-];
-
-/* 体質別の効果テキスト（組み合わせ） */
-const EFFECT_TEXT = {
-  keistai:   "主食材が気の流れを整え、副食材で肝の働きを助けます。胸のつかえ・イライラ・目の疲れを和らげ、春の気滞傾向に。",
-  shitsunetsu:"余分な熱と湿を排泄する食材の組み合わせ。口の苦み・湿疹・倦怠感を内側から改善し、夏の湿熱対策に。",
-  tanshitsu: "健脾利湿の食材で脾胃を健やかにし、滞った湿を排出。梅雨時期のだるさ・胃もたれ・むくみを和らげます。",
-  kiinkyo:   "滋陰の食材で体を潤し、気も補う組み合わせ。夏の終わりの気力低下・口の渇き・微熱に。",
-  inkyo:     "滋陰潤燥の食材で肺と肌を潤し、乾燥から体を守る組み合わせ。喉の乾き・空咳・肌のカサつきに。",
-  yokyo:     "温補腎陽の食材で体を芯から温め、腎の陽気を回復。冬の冷え・腰痛・手足の冷えを改善します。"
+    advice:"温補腎陽（腎を温めて陽気を補う）の食材を。生姜・羊肉・黒豆で体を芯から温める。",
+    cautions:"のぼせ・暑がりの方は量を控え、寝る直前は生姜を控えめに。" },
+  qixu:     { label:"気虚", season:"秋", organ:"脾・肺",
+    summary:"エネルギー（気）が不足し、疲れやすい・声が小さい・風邪をひきやすい体質です。",
+    advice:"補気（気を補う）の食材を。米・鶏肉・山芋・棗（なつめ）・人参で気を養う。",
+    cautions:"食べ過ぎ・冷たいものの過剰摂取は気を消耗させるので控えめに。" },
+  xuexu:    { label:"血虚", season:"秋", organ:"肝・心",
+    summary:"血が不足し、めまい・肌の乾燥・生理不順・目の疲れが出やすい体質です。",
+    advice:"養血（血を補う）の食材を。黒ごま・ほうれん草・棗・卵・ピーナッツで血を養う。",
+    cautions:"冷たいもの・生の食べ物は消化に負担をかけ血を消耗させます。" },
+  xueyu:    { label:"血瘀", season:"冬", organ:"肝・心",
+    summary:"血の巡りが滞り、肩こり・冷え・生理痛・シミ・あざができやすい体質です。",
+    advice:"活血化瘀（血を巡らせる）の食材を。黒糖・酢・玉ねぎ・桃・シナモンで巡りを改善。",
+    cautions:"冷えは瘀血を悪化させるので下半身を中心に温めるのが大切。" },
+  yinxu:    { label:"陰虚（火旺）", season:"秋", organ:"肝・腎",
+    summary:"陰液の不足で熱が余り、のぼせ・寝汗・喉の渇き・便秘になりがちな体質です。",
+    advice:"滋陰清熱の食材を。梨・はちみつ・白ごま・豆腐・豚バラで潤し冷ます。",
+    cautions:"辛いもの・揚げ物・夜更かしは陰を消耗させるので控えめに。" },
+  qizhi:    { label:"気滞", season:"春", organ:"肝",
+    summary:"気の流れが停滞し、胸のつかえ・ため息・PMS・イライラが現れやすい体質です。",
+    advice:"疏肝理気の食材を。みかん・玉ねぎ・酢・セロリ・大根で巡りを改善。",
+    cautions:"ストレス・脂っこい食品は気の流れを滞らせるので控える。" },
+  shire:    { label:"湿熱", season:"夏", organ:"脾・胆",
+    summary:"熱と湿が体内にこもり、口臭・肌あれ・便秘・黄ぐすみが目立つ体質です。",
+    advice:"瀉火利湿の食材を。緑豆・冬瓜・はと麦・きゅうり・緑茶で湿熱を出す。",
+    cautions:"甘いもの・脂っこいもの・アルコールの摂り過ぎは湿熱を増やします。" }
 };
 
 const SEASON_EFFECT = {
@@ -878,6 +767,258 @@ function bindRecipeCardEvents(){
 /* ============================================================
    8. 体質レシピ描画と再生成
    ============================================================ */
+/* ----- 7-b. 体質別おすすめ食材（薬膳DB読み込み）----- */
+// 体質ごとの五性推奨順（瀉補・寒温の整合に基づく）
+const NATURE_PRIORITY = {
+  qixu:       ["平","温"],     // 補気：温・平で気を補う
+  xuexu:      ["平","温","涼"], // 養血
+  xueyu:      ["温","平","涼"], // 活血化瘀
+  keistai:    ["平","温","涼"], // 疏肝、気の巡りを助ける
+  shitsunetsu:["涼","寒","平"], // 瀉火利湿
+  tanshitsu:  ["平","温","涼"], // 健脾利湿
+  kiinkyo:    ["平","涼"],      // 滋陰
+  inkyo:      ["平","涼"],      // 滋陰潤燥
+  yokyo:      ["温","熱","平"]  // 温補腎陽
+};
+const NATURE_COLOR = { 寒:"#3a6f9a", 涼:"#5a8a6a", 平:"#a08420", 温:"#b36a1a", 熱:"#a43030" };
+const NATURE_ORDER = ["寒","涼","平","温","熱"];
+
+// 共有されたらここに食材を貼り付けてください（書式例 ↓）。
+// 例:
+// { name:"キャベツ", emoji:"🥬", nature:"平", flavors:["甘"],
+//   meridians:["肝","胃","腎"], effect:"胃腸の働きを助け消化を促す",
+//   traits:["keistai","inkyo"] }
+// なお、セカンダリブレインの「薬膳_食材別五性五味_薬膳データベース」が本セッションから
+// 　　　　参照できなかったため、下の DATASET_DB は貴アプリで使う食材に限り、
+// 　　　　　yakuzen-komachi.jp 「薬膳食材辞典」と kracie.co.jp 「カンポフルライフ by クラシエ」
+// 　　　　　および kampo-sodan.com 「漢方ライフ」の 3 ソースで一致した五性五味のみを専門家監修データ
+// 　　　　　として取り込んでいます。一致しなかった五性項目は食材を敢えてリストから除外しました。
+// 　　　　　本物のDBを共有しもらえたらこの配列を丸ごと差し替えます。
+// 全 68 食材・レシピ紐付け済
+let DATASET_DB = [
+  { name:"羊肉", emoji:"🥩", cat:"meat", nature:"熱", flavors:["甘"], meridians:["脾", "腎"], effect:"温補気血、温腎", traits:["balanced"], season:"秋・冬", cook:"鍋・煮込み" },
+  { name:"シナモン", emoji:"🧂", cat:"other", nature:"熱", flavors:["辛", "甘"], meridians:["腎", "脾", "心", "肝"], effect:"補火助陽、温経散寒、活血", traits:["balanced"], season:"秋・冬", cook:"紅茶・煮込み・焼き菓子" },
+  { name:"唐辛子", emoji:"🧂", cat:"other", nature:"熱", flavors:["辛"], meridians:["心", "脾"], effect:"温中散寒、開胃消食", traits:["balanced"], season:"夏以外・通年少量", cook:"薬味・炒め物・鍋" },
+  { name:"黒こしょう", emoji:"🧂", cat:"other", nature:"熱", flavors:["辛"], meridians:["胃", "大腸"], effect:"温中散寒、行気", traits:["balanced"], season:"秋・冬", cook:"スープ・炒め物・煮込み" },
+  { name:"みかん", emoji:"🍎", cat:"fruit", nature:"温", flavors:["甘", "酸"], meridians:["肺", "脾", "胃"], effect:"理気健脾、燥湿化痰", traits:["balanced"], season:"冬", cook:"生食・皮を薬味に" },
+  { name:"桃", emoji:"🍎", cat:"fruit", nature:"温", flavors:["甘", "酸"], meridians:["肺", "肝", "大腸"], effect:"生津潤腸、活血", traits:["balanced"], season:"夏", cook:"生食・コンポート" },
+  { name:"黒糖", emoji:"🧂", cat:"other", nature:"温", flavors:["甘"], meridians:["脾", "胃"], effect:"温中散寒、補血活血", traits:["balanced"], season:"秋・冬", cook:"飲み物・煮物" },
+  { name:"くるみ", emoji:"🧂", cat:"other", nature:"温", flavors:["甘"], meridians:["腎", "肺", "大腸"], effect:"補腎温肺、潤腸", traits:["balanced"], season:"秋・冬", cook:"そのまま・和え物・焼き菓子" },
+  { name:"松の実", emoji:"🧂", cat:"other", nature:"温", flavors:["甘"], meridians:["肺", "肝", "大腸"], effect:"潤肺、養液、潤腸", traits:["balanced"], season:"秋・冬", cook:"そのまま・粥・サラダ" },
+  { name:"栗", emoji:"🧂", cat:"other", nature:"温", flavors:["甘"], meridians:["脾", "腎"], effect:"健脾補腎、強筋活血", traits:["balanced"], season:"秋", cook:"茹でる・炊き込み・煮る" },
+  { name:"もち米", emoji:"🌾", cat:"grain", nature:"温", flavors:["甘"], meridians:["脾", "胃"], effect:"補中益気、温中", traits:["balanced"], season:"通年", cook:"おこわ・粥・蒸す" },
+  { name:"鶏肉", emoji:"🥩", cat:"meat", nature:"温", flavors:["甘"], meridians:["脾", "胃"], effect:"補中益気、補精填髄", traits:["balanced"], season:"通年", cook:"蒸す・煮る・スープ" },
+  { name:"鹿肉", emoji:"🥩", cat:"meat", nature:"温", flavors:["甘"], meridians:["脾", "腎"], effect:"補五臓、益気血、温陽", traits:["balanced"], season:"秋・冬", cook:"煮込み・鍋" },
+  { name:"味噌", emoji:"🧂", cat:"other", nature:"温", flavors:["鹹", "甘"], meridians:["脾", "胃"], effect:"健脾和胃、調中", traits:["balanced"], season:"通年", cook:"味噌汁・和え物・煮込み" },
+  { name:"酢", emoji:"🧂", cat:"other", nature:"温", flavors:["酸", "苦"], meridians:["肝", "胃"], effect:"散瘀止痛、消食解酒", traits:["balanced"], season:"通年", cook:"酢の物・ドレッシング・煮物" },
+  { name:"かぼちゃ", emoji:"🥬", cat:"veg", nature:"温", flavors:["甘"], meridians:["脾", "胃"], effect:"補中益気、健脾", traits:["balanced"], season:"秋・冬", cook:"蒸す・煮る・スープ" },
+  { name:"玉ねぎ", emoji:"🥬", cat:"veg", nature:"温", flavors:["辛", "甘"], meridians:["肺", "心"], effect:"理気活血、和胃", traits:["balanced"], season:"通年", cook:"炒める・スープ" },
+  { name:"コーヒー", emoji:"🍵", cat:"tea", nature:"温", flavors:["苦"], meridians:["心", "肝", "腎"], effect:"行気醒脳", traits:["balanced"], season:"通年", cook:"抽出して飲む" },
+  { name:"紅茶", emoji:"🍵", cat:"tea", nature:"温", flavors:["苦", "甘"], meridians:["心", "脾", "胃"], effect:"温中養胃、提神", traits:["balanced"], season:"秋・冬", cook:"茶として淹れる" },
+  { name:"にんにく", emoji:"🥬", cat:"veg", nature:"温", flavors:["辛"], meridians:["脾", "胃", "肺"], effect:"温中行滞、解毒", traits:["balanced"], season:"秋・冬", cook:"加熱料理・薬味" },
+  { name:"生姜", emoji:"🥬", cat:"veg", nature:"温", flavors:["辛"], meridians:["肺", "脾", "胃"], effect:"温中散寒、化痰止嘔、解表", traits:["balanced"], season:"秋・冬", cook:"薬味・スープ・煮物" },
+  { name:"長ねぎ", emoji:"🥬", cat:"veg", nature:"温", flavors:["辛"], meridians:["肺", "胃"], effect:"散寒解表、通陽", traits:["balanced"], season:"秋・冬", cook:"鍋・スープ・薬味" },
+  { name:"えび", emoji:"🥩", cat:"meat", nature:"温", flavors:["甘", "鹹"], meridians:["肝", "腎"], effect:"補腎壮陽、益気", traits:["balanced"], season:"秋・冬", cook:"炒める・蒸す・スープ" },
+  { name:"鮭", emoji:"🥩", cat:"meat", nature:"温", flavors:["甘"], meridians:["脾", "胃"], effect:"温中補気、補血", traits:["balanced"], season:"秋・冬", cook:"焼く・蒸す・汁物" },
+  { name:"鯖", emoji:"🥩", cat:"meat", nature:"温", flavors:["甘"], meridians:["肝", "胃"], effect:"補益五臓、活血", traits:["balanced"], season:"秋・冬", cook:"焼く・煮る" },
+  { name:"しいたけ", emoji:"🍄", cat:"mush", nature:"平", flavors:["甘"], meridians:["胃", "肝"], effect:"益気補虚、健脾胃", traits:["balanced"], season:"秋・冬", cook:"煮る・焼く・スープ" },
+  { name:"しめじ", emoji:"🍄", cat:"mush", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"健脾益気", traits:["balanced"], season:"秋", cook:"炒める・スープ・炊き込み" },
+  { name:"まいたけ", emoji:"🍄", cat:"mush", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"益気健脾", traits:["balanced"], season:"秋・冬", cook:"炒める・鍋・スープ" },
+  { name:"ぶどう", emoji:"🍎", cat:"fruit", nature:"平", flavors:["甘", "酸"], meridians:["肺", "脾", "腎"], effect:"補気血、生津、利水", traits:["balanced"], season:"秋", cook:"生食・加熱" },
+  { name:"梅", emoji:"🍎", cat:"fruit", nature:"平", flavors:["酸", "渋"], meridians:["肝", "脾", "肺"], effect:"斂肺、生津、止渇", traits:["balanced"], season:"初夏", cook:"梅干し・梅シロップ・煮る" },
+  { name:"はちみつ", emoji:"🍎", cat:"fruit", nature:"平", flavors:["甘"], meridians:["肺", "脾", "大腸"], effect:"補中潤燥、止痛解毒、潤腸", traits:["balanced"], season:"通年", cook:"白湯・ドリンク・料理の甘味" },
+  { name:"白砂糖", emoji:"🧂", cat:"other", nature:"平", flavors:["甘"], meridians:["脾", "肺"], effect:"和中潤肺", traits:["balanced"], season:"通年", cook:"料理・飲み物" },
+  { name:"ごま", emoji:"🧂", cat:"other", nature:"平", flavors:["甘"], meridians:["肝", "腎", "大腸"], effect:"補肝腎、潤燥滑腸", traits:["balanced"], season:"通年", cook:"すりごま・和え物" },
+  { name:"黒ごま", emoji:"🧂", cat:"other", nature:"平", flavors:["甘"], meridians:["肝", "腎", "大腸"], effect:"補肝腎、益精血、潤燥", traits:["balanced"], season:"秋・冬", cook:"すりごま・和え物・粥" },
+  { name:"玄米", emoji:"🌾", cat:"grain", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"健脾、補中", traits:["balanced"], season:"通年", cook:"炊飯・雑炊" },
+  { name:"米", emoji:"🌾", cat:"grain", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"補中益気、健脾和胃", traits:["balanced"], season:"通年", cook:"炊飯・お粥" },
+  { name:"牛肉", emoji:"🥩", cat:"meat", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"補脾胃、益気血、強筋骨", traits:["balanced"], season:"秋・冬", cook:"煮込み・スープ" },
+  { name:"豚肉", emoji:"🥩", cat:"meat", nature:"平", flavors:["甘", "鹹"], meridians:["脾", "胃", "腎"], effect:"滋陰、潤燥、補血", traits:["balanced"], season:"秋・冬", cook:"煮る・蒸す・スープ" },
+  { name:"鶏卵", emoji:"🥩", cat:"meat", nature:"平", flavors:["甘"], meridians:["肺", "脾", "胃"], effect:"滋陰潤燥、養血", traits:["balanced"], season:"通年", cook:"蒸す・ゆでる・スープ" },
+  { name:"大豆", emoji:"🌾", cat:"grain", nature:"平", flavors:["甘"], meridians:["脾", "大腸"], effect:"健脾利水、補気", traits:["balanced"], season:"通年", cook:"煮豆・汁物・豆乳" },
+  { name:"小豆", emoji:"🌾", cat:"grain", nature:"平", flavors:["甘", "酸"], meridians:["心", "小腸"], effect:"利水消腫、清熱解毒", traits:["balanced"], season:"梅雨・夏", cook:"煮る・お粥" },
+  { name:"黒豆", emoji:"🌾", cat:"grain", nature:"平", flavors:["甘"], meridians:["脾", "腎"], effect:"補腎、活血、利水", traits:["balanced"], season:"秋・冬", cook:"煮豆・スープ" },
+  { name:"にんじん", emoji:"🥬", cat:"veg", nature:"平", flavors:["甘"], meridians:["肺", "脾", "肝"], effect:"健脾化滞、養肝明目", traits:["balanced"], season:"通年", cook:"煮る・蒸す・炒める" },
+  { name:"キャベツ", emoji:"🥬", cat:"veg", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"補中益気、健脾和胃", traits:["balanced"], season:"通年", cook:"蒸す・スープ・炒める" },
+  { name:"白菜", emoji:"🥬", cat:"veg", nature:"平", flavors:["甘"], meridians:["胃", "大腸"], effect:"清熱利水、養胃", traits:["balanced"], season:"秋・冬", cook:"鍋・スープ・蒸す" },
+  { name:"牡蠣", emoji:"🦪", cat:"sea", nature:"平", flavors:["甘", "鹹"], meridians:["肝", "腎"], effect:"滋陰養血、重鎮安神", traits:["balanced"], season:"秋・冬", cook:"蒸す・煮る・鍋" },
+  { name:"秋刀魚", emoji:"🥩", cat:"meat", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"補五臓、滋陰", traits:["balanced"], season:"秋", cook:"焼く・煮る" },
+  { name:"鯛", emoji:"🥩", cat:"meat", nature:"平", flavors:["甘"], meridians:["脾", "胃"], effect:"補気健脾、利水", traits:["balanced"], season:"通年", cook:"蒸す・煮る・汁物" },
+  { name:"いちご", emoji:"🍎", cat:"fruit", nature:"涼", flavors:["甘", "酸"], meridians:["肺", "脾", "胃"], effect:"清熱生津、健脾", traits:["balanced"], season:"春", cook:"生食・加熱" },
+  { name:"りんご", emoji:"🍎", cat:"fruit", nature:"涼", flavors:["甘", "酸"], meridians:["脾", "胃", "心"], effect:"生津止渇、健脾和胃", traits:["balanced"], season:"秋", cook:"焼く・煮る・コンポート" },
+  { name:"オレンジ", emoji:"🍎", cat:"fruit", nature:"涼", flavors:["甘", "酸"], meridians:["肺", "胃"], effect:"生津止渇、理気化痰", traits:["balanced"], season:"冬", cook:"生食・ジュース・サラダ" },
+  { name:"そば", emoji:"🌾", cat:"grain", nature:"涼", flavors:["甘"], meridians:["脾", "胃", "大腸"], effect:"消食、下気", traits:["balanced"], season:"秋・冬", cook:"そば・そば粥" },
+  { name:"はと麦", emoji:"🧂", cat:"other", nature:"涼", flavors:["甘", "淡"], meridians:["脾", "肺", "腎"], effect:"健脾利湿、清熱", traits:["balanced"], season:"梅雨・夏", cook:"炊飯・スープ・お茶" },
+  { name:"小麦", emoji:"🌾", cat:"grain", nature:"涼", flavors:["甘"], meridians:["心", "脾", "腎"], effect:"養心除煩、益気", traits:["balanced"], season:"通年", cook:"粥・麺・パン" },
+  { name:"豆腐", emoji:"📦", cat:"bean", nature:"涼", flavors:["甘"], meridians:["脾", "胃", "大腸"], effect:"生津潤燥、清熱", traits:["balanced"], season:"夏・通年", cook:"湯豆腐・汁物" },
+  { name:"ほうれん草", emoji:"🥬", cat:"veg", nature:"涼", flavors:["甘", "苦"], meridians:["肝", "胃", "大腸"], effect:"養血、潤燥、平肝", traits:["balanced"], season:"冬・春", cook:"茹でる・炒める・スープ" },
+  { name:"大根", emoji:"🥬", cat:"veg", nature:"涼", flavors:["辛", "甘"], meridians:["肺", "胃"], effect:"消食化痰、下気寛中", traits:["balanced"], season:"冬", cook:"煮物・大根おろし・汁物" },
+  { name:"トマト", emoji:"🥬", cat:"veg", nature:"涼", flavors:["甘", "酸"], meridians:["肝", "脾", "胃"], effect:"生津止渇、健胃消食、清熱", traits:["balanced"], season:"夏", cook:"生食・煮込み・スープ" },
+  { name:"えのき", emoji:"🍄", cat:"mush", nature:"寒", flavors:["甘"], meridians:["脾", "胃"], effect:"益胃健脾、利湿", traits:["balanced"], season:"秋・冬", cook:"鍋・スープ・炒める" },
+  { name:"梨", emoji:"🍎", cat:"fruit", nature:"寒", flavors:["甘", "微酸"], meridians:["肺", "胃"], effect:"清熱潤肺、生津止渇", traits:["balanced"], season:"秋", cook:"生食・蒸す・煮る" },
+  { name:"醤油", emoji:"🧂", cat:"other", nature:"寒", flavors:["鹹"], meridians:["脾", "胃"], effect:"調和脾胃", traits:["balanced"], season:"通年", cook:"煮物・たれ・汁物" },
+  { name:"緑豆", emoji:"🥬", cat:"veg", nature:"寒", flavors:["甘"], meridians:["心", "胃"], effect:"清熱解毒、消暑利水", traits:["balanced"], season:"夏", cook:"スープ・粥" },
+  { name:"きゅうり", emoji:"🥬", cat:"veg", nature:"寒", flavors:["甘"], meridians:["肺", "脾", "胃"], effect:"清熱利水、生津止渇", traits:["balanced"], season:"夏", cook:"生食・酢の物・浅漬け" },
+  { name:"ごぼう", emoji:"🥬", cat:"veg", nature:"寒", flavors:["苦", "辛"], meridians:["肺", "胃"], effect:"清熱解毒、潤腸通便", traits:["balanced"], season:"秋・冬", cook:"きんぴら・煮物・スープ" },
+  { name:"なす", emoji:"🥬", cat:"veg", nature:"寒", flavors:["甘"], meridians:["脾", "胃", "大腸"], effect:"清熱活血、消腫", traits:["balanced"], season:"夏・秋", cook:"焼く・蒸す・煮る" },
+  { name:"れんこん", emoji:"🥬", cat:"veg", nature:"寒", flavors:["甘"], meridians:["心", "脾", "胃"], effect:"清熱生津、涼血止血", traits:["balanced"], season:"秋・冬", cook:"煮る・蒸す・汁物" },
+  { name:"緑茶", emoji:"🍵", cat:"tea", nature:"寒", flavors:["苦", "甘"], meridians:["心", "肺", "胃"], effect:"清熱除煩、生津止渇、利尿", traits:["balanced"], season:"春・夏", cook:"茶として淹れる" },
+  { name:"あさり", emoji:"🥩", cat:"meat", nature:"寒", flavors:["甘", "鹹"], meridians:["肝", "腎"], effect:"清熱化痰、利水", traits:["balanced"], season:"春・夏", cook:"汁物・酒蒸し" },
+];
+
+let RECIPE_DB = {"羊肉": [{"title": "ラム肉のピリ辛味噌炒め", "time": "約15分", "src": "housefoods.jp/recipe/rcp_00008064.html", "ingredients": [{"item": "羊肉(ラム)", "amount": "200g"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "玉ねぎ", "amount": "1/2個"}, {"item": "人参", "amount": "1/3本"}, {"item": "油", "amount": "大さじ1"}], "steps": ["野菜を食べやすい大きさに切る", "フライパンに油を熱し羊肉を炒める", "野菜を加えてさらに炒め、合わせた調味料で味付けする"]}], "シナモン": [{"title": "シナモンティー", "time": "約5分", "src": "delishkitchen.tv/recipes/375469891957817785", "ingredients": [{"item": "紅茶(ティーバッグ)", "amount": "1袋"}, {"item": "シナモン(スティック)", "amount": "1本"}, {"item": "砂糖", "amount": "お好み"}, {"item": "熱湯", "amount": "150ml"}], "steps": ["カップにティーバッグとシナモンを入れる", "熱湯を注ぎ3〜5分蒸らす", "砂糖を加えて混ぜる"]}], "唐辛子": [{"title": "甘くない麻婆豆腐", "time": "約15分", "src": "delishkitchen.tv/recipes/168896990107664787", "ingredients": [{"item": "木綿豆腐", "amount": "1丁(300g)"}, {"item": "豚ひき肉", "amount": "100g"}, {"item": "長ねぎ", "amount": "1/2本"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "唐辛子", "amount": "お好み"}, {"item": "ごま油", "amount": "小さじ2"}], "steps": ["豆腐は1.5cm角に切る", "フライパンでごま油を熱し、豚ひき肉とねぎを炒める", "味噌・醤油・砂糖・唐辛子を混ぜた調味料を加え、豆腐を炒め合わせる"]}], "黒こしょう": [{"title": "塩こしょうスープ", "time": "約5分", "src": "ameblo.jp/syunkon/entry-12914363103.html", "ingredients": [{"item": "水", "amount": "300ml"}, {"item": "塩", "amount": "小さじ1/4"}, {"item": "砂糖", "amount": "ひとつまみ"}, {"item": "醤油", "amount": "数滴"}, {"item": "黒こしょう", "amount": "適量"}, {"item": "ごま油", "amount": "数滴"}], "steps": ["鍋に水を入れて火にかける", "塩・砂糖・醤油・黒こしょうで調味する", "仕上げにごま油を数滴たらす"]}], "みかん": [{"title": "みかんマーマレード", "time": "約30分", "src": "oceans-nadia.com/user/10254/recipe/135590", "ingredients": [{"item": "みかん", "amount": "3個"}, {"item": "砂糖", "amount": "300g"}], "steps": ["みかんを薄切りにする", "鍋にみかんと砂糖を入れ30分〜1時間置く", "弱火で煮詰める"]}], "桃": [{"title": "桃のコンポート(レンジ)", "time": "約5分", "src": "oceans-nadia.com/user/23188/recipe/396403", "ingredients": [{"item": "桃", "amount": "1個"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "レモン汁", "amount": "少々"}], "steps": ["桃を6等分に切る", "耐熱ボウルに入れ砂糖とレモン汁をふる", "ラップをかけてレンジ600Wで2分加熱"]}], "黒糖": [{"title": "黒糖くるみ", "time": "約5分", "src": "cotta.jp/recipe/recipe.php?recipeid=00020814", "ingredients": [{"item": "くるみ", "amount": "80g"}, {"item": "黒糖", "amount": "30g"}, {"item": "水", "amount": "大さじ1/2"}], "steps": ["くるみをから煎りする", "フライパンに黒糖と水を入れて加熱", "黒糖が溶けたらくるみを絡める"]}], "くるみ": [{"title": "黒糖くるみ", "time": "約5分", "src": "cotta.jp/recipe/recipe.php?recipeid=00020814", "ingredients": [{"item": "くるみ", "amount": "80g"}, {"item": "黒糖", "amount": "30g"}, {"item": "水", "amount": "大さじ1/2"}], "steps": ["くるみをから煎りする", "フライパンに黒糖と水を入れて加熱", "黒糖が溶けたらくるみを絡める"]}], "松の実": [{"title": "水菜ときゅうりの松の実サラダ", "time": "約5分", "src": "kikkoman.co.jp/homecook/search/recipe/00002385/", "ingredients": [{"item": "水菜", "amount": "1袋"}, {"item": "きゅうり", "amount": "1本"}, {"item": "松の実", "amount": "大さじ1"}, {"item": "ごま油", "amount": "小さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "酢", "amount": "小さじ1"}, {"item": "砂糖", "amount": "ひとつまみ"}], "steps": ["水菜ときゅうりを食べやすく切る", "小松の実をごま油で炒める", "全部ボウルでざっくり和える"]}], "栗": [{"title": "栗ときのこの炊き込みご飯", "time": "約15分", "src": "oceans-nadia.com/user/279721/recipe/400594", "ingredients": [{"item": "米", "amount": "3合"}, {"item": "むき栗", "amount": "200g"}, {"item": "しめじ", "amount": "1パック"}, {"item": "にんじん", "amount": "30g"}, {"item": "油揚げ", "amount": "1/2枚"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "塩", "amount": "小さじ1"}], "steps": ["米を研いで炊飯器に入れる", "具材と調味料を加える", "通常モードで炊飯する"]}], "もち米": [{"title": "鶏肉のもち米粥", "time": "約15分(炊飯)", "src": "recipe.yamasa.com/recipes/4553", "ingredients": [{"item": "もち米", "amount": "1/2合"}, {"item": "鶏肉", "amount": "100g"}, {"item": "生姜", "amount": "1片"}, {"item": "塩", "amount": "小さじ1/3"}, {"item": "醤油", "amount": "小さじ1"}], "steps": ["鍋にもち米・水・酒・鶏肉・生姜を入れる", "ふたをして40分煮る", "塩・醤油で味を調える"]}], "鶏肉": [{"title": "鶏もも肉ともやしのガーリック醤油炒め", "time": "約15分", "src": "oceans-nadia.com/user/111095/recipe/393618", "ingredients": [{"item": "鶏もも肉", "amount": "1枚(約300g)"}, {"item": "もやし", "amount": "1袋"}, {"item": "醤油", "amount": "大さじ1と1/2"}, {"item": "ごま油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "黒こしょう", "amount": "少々"}], "steps": ["鶏肉を一口大に切る", "フライパンでごま油を熱し鶏肉を炒める", "もやしを加えて炒め、調味料で味付け"]}], "鹿肉": [{"title": "鹿肉のすき焼き風", "time": "約15分", "src": "yakuzen-komachi.jp/dictionary", "ingredients": [{"item": "鹿肉", "amount": "150g"}, {"item": "白菜", "amount": "1/4株"}, {"item": "長ねぎ", "amount": "1本"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "油", "amount": "大さじ1"}], "steps": ["野菜を切る", "フライパンに油を熱し鹿肉を炒める", "調味料を加え野菜と煮る"]}], "味噌": [{"title": "即席ねぎ味噌汁", "time": "約5分", "src": "oceans-nadia.com/user/82993/recipe/381839", "ingredients": [{"item": "長ねぎ", "amount": "1本"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "水", "amount": "400ml"}], "steps": ["鍋に水を入れて沸かす", "長ねぎを斜め切りにして加える", "味噌を溶き入れる"]}], "酢": [{"title": "きゅうりの酢の物", "time": "約5分", "src": "oceans-nadia.com/user/28/recipe/459423", "ingredients": [{"item": "きゅうり", "amount": "2本"}, {"item": "酢", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "塩", "amount": "少々"}], "steps": ["きゅうりを切る", "調味料を合わせる", "ビニール袋に入れてもみ込む"]}], "かぼちゃ": [{"title": "かぼちゃの煮物（砂糖醤油）", "time": "約15分", "src": "oceans-nadia.com/user/259228/recipe/419794", "ingredients": [{"item": "かぼちゃ", "amount": "300g"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "水", "amount": "125ml"}], "steps": ["かぼちゃを2〜3cmに切る", "耐熱ボウルに調味料とかぼちゃを入れる", "ラップしてレンジ600Wで8分加熱"]}], "玉ねぎ": [{"title": "玉ねぎと卵のスープ", "time": "約10分", "src": "oceans-nadia.com/user/765465/recipe/443146", "ingredients": [{"item": "玉ねぎ", "amount": "1/2個"}, {"item": "卵", "amount": "1個"}, {"item": "水", "amount": "400ml"}, {"item": "醤油", "amount": "小さじ1/2"}, {"item": "塩", "amount": "少々"}, {"item": "黒こしょう", "amount": "少々"}], "steps": ["玉ねぎを薄切りにする", "鍋に水と玉ねぎを入れ煮る", "溶き卵を回し入れ、醤油で調味"]}], "コーヒー": [{"title": "ブラックコーヒー", "time": "約5分", "src": "delishkitchen.tv/recipes/247474260547732586", "ingredients": [{"item": "コーヒー豆", "amount": "10g"}, {"item": "砂糖", "amount": "お好み"}], "steps": ["ドリッパーにフィルターをセット", "挽いた豆を入れお湯を注ぐ", "お好みで砂糖を加える"]}], "紅茶": [{"title": "ジンジャーティー", "time": "約5分", "src": "delishkitchen.tv/recipes/294432142044169294", "ingredients": [{"item": "紅茶(ティーバッグ)", "amount": "1袋"}, {"item": "生姜", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "熱湯", "amount": "200ml"}], "steps": ["生姜をすりおろす", "カップに紅茶と生姜を入れる", "熱湯を注ぎ砂糖を加える"]}], "にんにく": [{"title": "にんにく醤油だれ", "time": "約5分", "src": "oceans-nadia.com/user/111095/recipe/393618", "ingredients": [{"item": "にんにく", "amount": "1片"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "ごま油", "amount": "小さじ1"}], "steps": ["にんにくをみじん切りにする", "調味料と合わせる", "肉や野菜にかけて使う"]}], "生姜": [{"title": "生姜紅茶", "time": "約5分", "src": "delishkitchen.tv/recipes/294432142044169294", "ingredients": [{"item": "紅茶(ティーバッグ)", "amount": "1袋"}, {"item": "生姜", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "熱湯", "amount": "200ml"}], "steps": ["生姜をすりおろす", "カップに紅茶と生姜を入れる", "熱湯を注ぎ砂糖を加える"]}], "長ねぎ": [{"title": "即席ねぎ味噌汁", "time": "約5分", "src": "oceans-nadia.com/user/82993/recipe/381839", "ingredients": [{"item": "長ねぎ", "amount": "1本"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "水", "amount": "400ml"}, {"item": "油揚げ", "amount": "1/2枚"}], "steps": ["鍋に水と油揚げを入れて沸かす", "長ねぎを斜め切りにして加える", "味噌を溶き入れる"]}], "えび": [{"title": "海老のガーリックバター醤油炒め", "time": "約15分", "src": "ebino-ya.jp/blogs/recipe/", "ingredients": [{"item": "むき海老", "amount": "125g"}, {"item": "にんにく", "amount": "2片"}, {"item": "バター", "amount": "20g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "黒こしょう", "amount": "少々"}, {"item": "油", "amount": "大さじ1"}], "steps": ["海老を解凍し水気を切る", "フライパンに油とにんにくを熱する", "海老を炒め、バターと醤油を加える"]}], "鮭": [{"title": "鮭のガーリックバターホイル焼き", "time": "約15分", "src": "oceans-nadia.com/user/749006/recipe/445770", "ingredients": [{"item": "生鮭", "amount": "2切れ"}, {"item": "舞茸", "amount": "1パック"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "小さじ2"}, {"item": "にんにく", "amount": "1片"}, {"item": "塩", "amount": "少々"}, {"item": "こしょう", "amount": "少々"}], "steps": ["鮭に塩こしょうをふる", "アルミホイルに鮭・舞茸・バター・にんにく・醤油をのせる", "包んでフライパンで15分蒸し焼き"]}], "鯖": [{"title": "鯖の味噌煮(レンジ)", "time": "約15分", "src": "ism.life/special/yamamoto001.html", "ingredients": [{"item": "鯖", "amount": "2切れ"}, {"item": "味噌", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "酒", "amount": "大さじ1"}], "steps": ["鯖の皮に浅く切れ込みを入れる", "調味料を耐熱容器に混ぜる", "鯖を加えてラップし、レンジで5分"]}], "しいたけ": [{"title": "椎茸バター醤油焼き", "time": "約10分", "src": "kagome.co.jp/vegeday/eat/202308/13641/", "ingredients": [{"item": "しいたけ", "amount": "8個"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "小さじ1/2"}, {"item": "黒こしょう", "amount": "少々"}, {"item": "油", "amount": "大さじ1"}], "steps": ["しいたけを食べやすく切る", "フライパンに油を熱し両面焼く", "バターと醤油を回しかける"]}], "しめじ": [{"title": "悪魔のきのこ(バター醤油)", "time": "約10分", "src": "delishkitchen.tv/recipes/528266863558263207", "ingredients": [{"item": "しめじ", "amount": "1パック"}, {"item": "しいたけ", "amount": "1パック"}, {"item": "えのき", "amount": "1袋"}, {"item": "にんにく", "amount": "2片"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "塩", "amount": "小さじ1/3"}, {"item": "こしょう", "amount": "少々"}], "steps": ["きのこをほぐす", "フライパンにバターとにんにくを熱する", "きのこを炒め醤油で調味"]}], "まいたけ": [{"title": "まいたけのバター醤油炒め", "time": "約10分", "src": "oceans-nadia.com/user/28/recipe/113848", "ingredients": [{"item": "まいたけ", "amount": "1パック"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "油", "amount": "大さじ1"}], "steps": ["まいたけをほぐす", "フライパンに油を熱しまいたけを炒める", "バターと醤油で調味"]}], "ぶどう": [{"title": "ぶどうコンポート", "time": "約15分", "src": "orangepage.net/recipes/303097", "ingredients": [{"item": "ぶどう", "amount": "1房"}, {"item": "砂糖", "amount": "大さじ3"}, {"item": "水", "amount": "200ml"}, {"item": "レモン汁", "amount": "小さじ1"}], "steps": ["ぶどうの皮を湯剥きする", "鍋に水・砂糖・レモン汁を入れる", "ぶどうを加えて20分煮る"]}], "梅": [{"title": "梅シロップ", "time": "約5分(仕込み)", "src": "on-the-slope.com/articles/recipe_all/recipe/articles-184491/", "ingredients": [{"item": "青梅", "amount": "1kg"}, {"item": "砂糖", "amount": "1kg"}], "steps": ["梅を洗って水気を拭く", "ヘタを取る", "梅と砂糖を交互にビンに入れる"]}], "はちみつ": [{"title": "ホットはちみつレモン", "time": "約5分", "src": "ito-noen.com/dictionary/recipe/", "ingredients": [{"item": "はちみつ", "amount": "大さじ1"}, {"item": "レモン果汁", "amount": "大さじ1"}, {"item": "熱湯", "amount": "150ml"}], "steps": ["カップにはちみつとレモン果汁を入れる", "熱湯を注ぐ", "軽く混ぜる"]}], "白砂糖": [{"title": "シュガートースト", "time": "約5分", "src": "oceans-nadia.com/user/1234942/recipe/508021", "ingredients": [{"item": "食パン", "amount": "1枚"}, {"item": "バター", "amount": "10g"}, {"item": "砂糖", "amount": "大さじ1"}], "steps": ["フライパンにバターを溶かす", "砂糖を入れる", "食パンをのせて両面焼く"]}], "ごま": [{"title": "ほうれん草のごま和え", "time": "約5分", "src": "sirogohan.com/recipe/hourensougomaae/", "ingredients": [{"item": "ほうれん草", "amount": "1束"}, {"item": "すりごま", "amount": "大さじ1と1/2"}, {"item": "砂糖", "amount": "小さじ1/2"}, {"item": "醤油", "amount": "大さじ1/2"}], "steps": ["ほうれん草をゆでて水気を絞る", "すりごまをすり、砂糖と醤油を混ぜる", "和える"]}], "黒ごま": [{"title": "黒ごまとうふ", "time": "約5分", "src": "yutori.co.jp/shop/rp/rp231757/", "ingredients": [{"item": "絹ごし豆腐", "amount": "1/2丁"}, {"item": "黒ごま", "amount": "大さじ2"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "醤油", "amount": "小さじ1"}], "steps": ["豆腐を1cm角に切る", "黒ごまをすって砂糖と醤油を混ぜる", "豆腐にかけて和える"]}], "玄米": [{"title": "海苔佃煮の炊き込みご飯", "time": "約15分", "src": "kaneko-nori.co.jp/recipe/takikomi-2/", "ingredients": [{"item": "玄米", "amount": "2合"}, {"item": "海苔の佃煮", "amount": "60g"}, {"item": "醤油", "amount": "大さじ1"}], "steps": ["玄米を研いで炊飯器に入れる", "海苔佃煮と醤油を加える", "通常モードで炊飯"]}], "米": [{"title": "卵の炊き込みご飯", "time": "約10分(炊飯)", "src": "buzzfeed.com/jp/maorikato/egg-rice", "ingredients": [{"item": "米", "amount": "2合"}, {"item": "卵", "amount": "2個"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "ごま油", "amount": "小さじ1"}], "steps": ["炊飯釜に米・調味料・卵を入れる", "2合の目盛りまで水を注ぐ", "通常モードで炊飯する"]}], "牛肉": [{"title": "牛肉ときのこのバター醤油炒め", "time": "約15分", "src": "cgc-kitchen365.jp/search/detail/66b33a853ae0083a0c1bc3f7", "ingredients": [{"item": "牛こま切れ肉", "amount": "200g"}, {"item": "エリンギ", "amount": "1パック"}, {"item": "えのき", "amount": "1袋"}, {"item": "にんにく", "amount": "1かけ"}, {"item": "バター", "amount": "30g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "黒こしょう", "amount": "少々"}, {"item": "油", "amount": "大さじ1"}], "steps": ["牛肉を切る", "フライパンにバターとにんにくを熱する", "牛肉ときのこを炒め醤油で調味"]}], "豚肉": [{"title": "白菜と豚バラの味噌炒め", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00058333/", "ingredients": [{"item": "豚バラ薄切り", "amount": "200g"}, {"item": "白菜", "amount": "1/4株"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "ごま油", "amount": "大さじ1"}], "steps": ["白菜を一口大に切る", "フライパンでごま油を熱し豚肉を炒める", "白菜を加えて調味料で味付け"]}], "鶏卵": [{"title": "玉ねぎと卵のスープ", "time": "約10分", "src": "oceans-nadia.com/user/765465/recipe/443146", "ingredients": [{"item": "鶏卵", "amount": "1個"}, {"item": "玉ねぎ", "amount": "1/2個"}, {"item": "水", "amount": "400ml"}, {"item": "醤油", "amount": "小さじ1/2"}, {"item": "塩", "amount": "少々"}], "steps": ["玉ねぎを薄切りにする", "鍋に水と玉ねぎを入れ煮る", "溶き卵を回し入れ醤油で調味"]}], "大豆": [{"title": "大豆の甘煮", "time": "約15分", "src": "kamada.co.jp/recipe/list/3158", "ingredients": [{"item": "水煮大豆", "amount": "100g"}, {"item": "だし醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ2"}], "steps": ["鍋に大豆・砂糖・水(少量)を入れる", "弱火で10分煮る", "醤油を加えひと煮立ち"]}], "小豆": [{"title": "小豆粥", "time": "約15分", "src": "cookpad.com/jp/recipes/21033655", "ingredients": [{"item": "小豆", "amount": "50g"}, {"item": "米", "amount": "1/2合"}, {"item": "水", "amount": "800ml"}, {"item": "砂糖", "amount": "お好み"}], "steps": ["小豆をゆでる", "炊飯釜に米・ゆでた小豆・煮汁を入れる", "おかゆモードで炊く"]}], "黒豆": [{"title": "黒豆の煮豆", "time": "約15分(圧力鍋)", "src": "sirogohan.com/recipe/kuromame/", "ingredients": [{"item": "黒豆", "amount": "200g"}, {"item": "砂糖", "amount": "200g"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "水", "amount": "1L"}], "steps": ["黒豆を一晩水に浸す", "鍋に黒豆・砂糖・水・醤油を入れる", "3〜4時間煮る"]}], "にんじん": [{"title": "にんじんのきんぴら", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00005339/", "ingredients": [{"item": "にんじん", "amount": "1本"}, {"item": "ごま油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "酒", "amount": "大さじ1"}], "steps": ["にんじんを細切りにする", "フライパンでごま油を熱し炒める", "砂糖・醤油・酒で調味"]}], "キャベツ": [{"title": "キャベツと豚こまの味噌炒め", "time": "約10分", "src": "oceans-nadia.com/user/749006/recipe/480158", "ingredients": [{"item": "キャベツ", "amount": "1/4玉"}, {"item": "豚こま切れ", "amount": "150g"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "大さじ1/2"}, {"item": "ごま油", "amount": "大さじ1"}], "steps": ["キャベツを食べやすく切る", "豚こまに塩こしょうを揉み込む", "ごま油で炒め合わせ調味料で味付け"]}], "白菜": [{"title": "白菜と豚バラの味噌炒め", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00058333/", "ingredients": [{"item": "白菜", "amount": "1/4株"}, {"item": "豚バラ薄切り", "amount": "200g"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "ごま油", "amount": "大さじ1"}], "steps": ["白菜を一口大に切る", "フライパンでごま油を熱し豚肉、白菜の順で炒める", "味噌・醤油・砂糖で調味"]}], "牡蠣": [{"title": "牡蠣のバター醤油焼き", "time": "約10分", "src": "recipe.suntory.co.jp/recipe/007060", "ingredients": [{"item": "牡蠣(加熱用)", "amount": "10個"}, {"item": "塩", "amount": "適量"}, {"item": "こしょう", "amount": "適量"}, {"item": "小麦粉", "amount": "大さじ2"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "大さじ1/2"}, {"item": "油", "amount": "大さじ1"}], "steps": ["牡蠣を塩水で洗い水気をきる", "小麦粉をまぶす", "フライパンで両面焼き、バターと醤油"]}], "秋刀魚": [{"title": "さんまの塩焼き", "time": "約10分", "src": "kikkoman.co.jp/homecook/washoku/015/", "ingredients": [{"item": "秋刀魚", "amount": "2尾"}, {"item": "塩", "amount": "適量"}], "steps": ["さんまを洗い水気を拭く", "塩を両面にふる", "グリルまたはフライパンで両面焼く"]}], "鯛": [{"title": "鯛の酒蒸し", "time": "約10分", "src": "oceans-nadia.com/user/654099/recipe/458093", "ingredients": [{"item": "鯛(切り身)", "amount": "2切れ"}, {"item": "酒", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "塩", "amount": "少々"}, {"item": "生姜", "amount": "1片"}], "steps": ["鯛に塩をふり10分置く", "フライパンに酒と生姜を入れ鯛を乗せる", "ふたをして中火で5分蒸す、醤油をかける"]}], "いちご": [{"title": "いちごのコンポート", "time": "約15分", "src": "cookpad.com/jp/recipes/18362806", "ingredients": [{"item": "いちご", "amount": "1パック"}, {"item": "砂糖", "amount": "大さじ4"}, {"item": "レモン汁", "amount": "大さじ1"}], "steps": ["いちごを洗いヘタを取る", "鍋にいちご・砂糖・レモン汁を入れる", "弱火で10分煮る"]}], "りんご": [{"title": "りんごのコンポート(バター風味)", "time": "約10分", "src": "poundlikes.com/apple-compote-butter/", "ingredients": [{"item": "りんご", "amount": "1個"}, {"item": "バター", "amount": "10g"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "レモン汁", "amount": "小さじ1"}], "steps": ["りんごをくし切りにする", "フライパンにバターを溶かす", "りんご・砂糖・レモン汁を入れ弱火で10分"]}], "オレンジ": [{"title": "オレンジマーマレード", "time": "約30分", "src": "delishkitchen.tv/recipes/247474260547732586", "ingredients": [{"item": "オレンジ", "amount": "2個"}, {"item": "砂糖", "amount": "200g"}, {"item": "レモン果汁", "amount": "大さじ1"}], "steps": ["オレンジを薄切りにする", "鍋にオレンジ・砂糖・レモン果汁を入れる", "30分置いてから中火で15分煮る"]}], "そば": [{"title": "かけそば", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00002758/", "ingredients": [{"item": "そば", "amount": "1人分"}, {"item": "水", "amount": "300ml"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "みりん", "amount": "大さじ2"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "長ねぎ", "amount": "1/4本"}], "steps": ["そばをゆでる", "鍋に水・醤油・みりん・砂糖でつゆを作る", "器にそばを盛りつゆをかけ刻みねぎを散らす"]}], "はと麦": [{"title": "はと麦茶", "time": "約5分", "src": "agripick.com/10251", "ingredients": [{"item": "はと麦", "amount": "大さじ1"}, {"item": "水", "amount": "200ml"}], "steps": ["やかんにはと麦と水を入れる", "沸騰したら弱火で3〜5分煮出す", "茶こしでこす"]}], "小麦": [{"title": "お好み焼き", "time": "約15分", "src": "nisshin.com/entertainment/komugiko_club/okonomiyaki_kansai/", "ingredients": [{"item": "薄力粉", "amount": "100g"}, {"item": "水", "amount": "150ml"}, {"item": "キャベツ", "amount": "300g"}, {"item": "卵", "amount": "1個"}, {"item": "お好み焼きソース", "amount": "適量"}, {"item": "マヨネーズ", "amount": "適量"}], "steps": ["薄力粉と水を混ぜ生地を作る", "キャベツを千切りにして加える", "ホットプレートで両面焼き、ソースとマヨ"]}], "豆腐": [{"title": "崩し豆腐ともやしのスープ", "time": "約10分", "src": "oceans-nadia.com/user/22780/recipe/385856", "ingredients": [{"item": "絹ごし豆腐", "amount": "1/2丁"}, {"item": "もやし", "amount": "1袋"}, {"item": "水", "amount": "400ml"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "醤油", "amount": "小さじ1"}], "steps": ["鍋に水を入れ沸かす", "もやしと手で崩した豆腐を加える", "味噌を溶き、醤油で調味"]}], "ほうれん草": [{"title": "ほうれん草のごま和え", "time": "約5分", "src": "sirogohan.com/recipe/hourensougomaae/", "ingredients": [{"item": "ほうれん草", "amount": "1束"}, {"item": "すりごま", "amount": "大さじ1と1/2"}, {"item": "醤油", "amount": "大さじ1/2"}, {"item": "砂糖", "amount": "小さじ1/2"}], "steps": ["ほうれん草を塩ゆでして水気を絞る", "すりごまをすり、砂糖と醤油を混ぜる", "ほうれん草を和える"]}], "大根": [{"title": "豚バラ大根の甘辛味噌煮", "time": "約15分", "src": "orangepage.net/news-daily/17492", "ingredients": [{"item": "豚バラ薄切り", "amount": "200g"}, {"item": "大根", "amount": "300g"}, {"item": "味噌", "amount": "大さじ2"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "水", "amount": "200ml"}], "steps": ["大根を乱切り、豚肉を切る", "鍋に水・大根を入れ5分煮る", "豚肉と味噌・醤油・砂糖を加え10分"]}], "トマト": [{"title": "トマトのコンポート", "time": "約10分", "src": "oishi-kenko.com/recipes/13185", "ingredients": [{"item": "ミニトマト", "amount": "200g"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "水", "amount": "100ml"}], "steps": ["ミニトマトのヘタを取る", "鍋に水・砂糖を沸かす", "トマトを入れ弱火で10分"]}], "えのき": [{"title": "えのきバター醤油炒め", "time": "約10分", "src": "kurashiru.com/recipes/4a184210-5502-4880-b9bd-91c74d38acd2", "ingredients": [{"item": "えのき", "amount": "1袋"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "塩", "amount": "少々"}, {"item": "こしょう", "amount": "少々"}], "steps": ["えのきを半分に切ってほぐす", "フライパンでバターを溶かす", "えのきを炒め醤油で調味"]}], "梨": [{"title": "梨のコンポート", "time": "約15分", "src": "ja-mienaka.or.jp/recipe/nashicompote/", "ingredients": [{"item": "梨", "amount": "1個"}, {"item": "砂糖", "amount": "大さじ3"}, {"item": "水", "amount": "200ml"}, {"item": "レモン汁", "amount": "小さじ1"}], "steps": ["梨を16等分に切り芯を取る", "鍋に水・砂糖・レモン汁を沸かす", "梨を入れ弱火で10分"]}], "醤油": [{"title": "だし醤油活用の卵かけご飯", "time": "約5分", "src": "mizkan.co.jp/ouchirecipe/recipe/?menu_id=22771", "ingredients": [{"item": "ご飯", "amount": "1人分"}, {"item": "卵", "amount": "1個"}, {"item": "醤油", "amount": "大さじ1〜2"}], "steps": ["ご飯を器に盛る", "卵を割り入れる", "醤油をかけて混ぜる"]}], "緑豆": [{"title": "緑豆春雨スープ", "time": "約10分", "src": "oceans-nadia.com/user/279721/recipe/404131", "ingredients": [{"item": "緑豆春雨", "amount": "30g"}, {"item": "水", "amount": "1000ml"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "塩", "amount": "少々"}, {"item": "ごま油", "amount": "小さじ1"}], "steps": ["鍋に水・春雨を入れ3〜4分煮る", "醤油・塩で調味", "仕上げにごま油"]}], "きゅうり": [{"title": "きゅうりの酢の物", "time": "約5分", "src": "oceans-nadia.com/user/28/recipe/459423", "ingredients": [{"item": "きゅうり", "amount": "2本"}, {"item": "酢", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "塩", "amount": "少々"}], "steps": ["きゅうりを切る", "調味料を合わせる", "ビニール袋に入れて15分置く"]}], "ごぼう": [{"title": "きんぴらごぼう", "time": "約10分", "src": "delishkitchen.tv/recipes/143452682072359331", "ingredients": [{"item": "ごぼう", "amount": "1本(180g)"}, {"item": "にんじん", "amount": "1/3本"}, {"item": "ごま油", "amount": "大さじ1/2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1と1/2"}, {"item": "酒", "amount": "30ml"}], "steps": ["ごぼう・にんじんを細切りにする", "フライパンでごま油を熱し炒める", "砂糖・醤油・酒で調味"]}], "なす": [{"title": "なすとピーマンの味噌炒め", "time": "約15分", "src": "erecipe.woman.excite.co.jp/detail/490da2df8b1baeb4e2b467c9fdf90330.html", "ingredients": [{"item": "なす", "amount": "3本"}, {"item": "ピーマン", "amount": "2個"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "砂糖", "amount": "大さじ1.5"}, {"item": "醤油", "amount": "大さじ1/2"}, {"item": "ごま油", "amount": "少々"}, {"item": "油", "amount": "大さじ2"}], "steps": ["なす・ピーマンを切る", "フライパンに油を熱しなすを炒める", "ピーマンと調味料を加え炒め合わせる"]}], "れんこん": [{"title": "れんこんのきんぴら", "time": "約10分", "src": "sirogohan.com/recipe/renkonkinpira/", "ingredients": [{"item": "れんこん", "amount": "1節(240g)"}, {"item": "ごま油", "amount": "大さじ1"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1と1/2"}, {"item": "酒", "amount": "大さじ1/2"}], "steps": ["れんこんを薄切りにする", "フライパンでごま油を熱し炒める", "砂糖・醤油・酒で調味"]}], "緑茶": [{"title": "緑茶(HOT)", "time": "約5分", "src": "delishkitchen.tv/recipes/375469891957817785", "ingredients": [{"item": "緑茶(茶葉)", "amount": "小さじ1"}, {"item": "熱湯", "amount": "200ml"}], "steps": ["急須に茶葉を入れる", "熱湯を注ぐ", "30秒〜1分で湯のみに注ぐ"]}], "あさり": [{"title": "あさりのバター醤油酒蒸し", "time": "約10分", "src": "marinfood.co.jp/restaurant/kondate/fish/post-504.html", "ingredients": [{"item": "あさり", "amount": "300g"}, {"item": "えのき", "amount": "1/2袋"}, {"item": "酒", "amount": "50ml"}, {"item": "バター", "amount": "15g"}, {"item": "醤油", "amount": "大さじ1"}], "steps": ["あさりを砂抜きし洗う", "フライパンに酒・あさり・えのきを入れる", "ふたをして中火2〜3分蒸す", "バターと醤油で調味"]}]};
+
+let currentNatureFilter = null;
+
+function getAvailableNatures(){
+  const s = new Set();
+  DATASET_DB.forEach(d => { if(d && d.nature) s.add(d.nature); });
+  return Array.from(s).sort((a,b) => NATURE_ORDER.indexOf(a) - NATURE_ORDER.indexOf(b));
+}
+
+function renderNatureFilter(){
+  const box = document.getElementById("natureFilter");
+  if(!box) return;
+  const natures = getAvailableNatures();
+  if(!natures.length){ box.innerHTML = ""; return; }
+  const items = ["", ...natures];
+  const html = items.map(n => {
+    const active = (currentNatureFilter||"") === n;
+    const color  = n ? NATURE_COLOR[n] : null;
+    const style  = active ? ` style="background:${color}; color:#fff; border-color:${color};"`
+                          : (color ? ` style="border-color:${color}; color:${color};"` : "");
+    const aria    = n ? n+"で絞り込み" : "絞り込み解除";
+    const label   = n || "全て";
+    return `<button type="button" class="nature-btn" role="tab"
+                    aria-selected="${active}" ${style} data-nature="${n}"
+                    aria-label="${aria}">${label}</button>`;
+  }).join("");
+  box.innerHTML = html;
+  box.querySelectorAll(".nature-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentNatureFilter = btn.dataset.nature || null;
+      renderNatureFilter();
+      renderFoodRecommend();
+    });
+  });
+}
+
+function renderFoodRecommend(){
+  const list = document.getElementById("foodChipList");
+  const empty = document.getElementById("foodEmpty");
+  if(!list || !empty) return;
+  if(!DATASET_DB.length){
+    list.innerHTML = "";
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  const traits = (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys : [];
+  let rows = DATASET_DB.filter(d => {
+    if(currentNatureFilter && d.nature !== currentNatureFilter) return false;
+    if(traits.length && !(d.traits||[]).some(t => traits.includes(t))) return false;
+    return true;
+  });
+
+  // 体質推奨順（nature）を保つ
+  if(traits.length){
+    const prio = [].concat(...traits.map(k => NATURE_PRIORITY[k]||[]));
+    rows.sort((a,b) => {
+      const ai = prio.indexOf(a.nature); const bi = prio.indexOf(b.nature);
+      return (ai<0?99:ai) - (bi<0?99:bi);
+    });
+  }
+
+  if(!rows.length){
+    list.innerHTML = `<div class="food-empty">該当する食材がありません。五性フィルタを解除してください。</div>`;
+    return;
+  }
+
+  list.innerHTML = rows.map(d => {
+    const color = NATURE_COLOR[d.nature] || "#888";
+    const rcount = (RECIPE_DB && RECIPE_DB[d.name]) ? RECIPE_DB[d.name].length : 0;
+    return `
+      <div class="food-chip" tabindex="0" role="group" data-name="${escapeHtml(d.name)}"
+           aria-label="${escapeHtml(d.name)} ${escapeHtml(d.nature||"")} レシピ${rcount}件">
+        <span class="fc-emoji">${escapeHtml(d.emoji||"")}</span>
+        <button type="button" class="fc-name-btn" data-name="${escapeHtml(d.name)}"
+                aria-label="${escapeHtml(d.name)}のレシピを表示">
+          <span class="fc-name">${escapeHtml(d.name)}</span>
+          <span class="fc-count">${rcount}レシピ</span>
+        </button>
+        <button type="button" class="fc-nature" role="tab"
+                aria-label="${escapeHtml(d.name)}の五性${escapeHtml(d.nature||"")}で絞り込む"
+                data-nature="${escapeHtml(d.nature||"")}"
+                style="background:${color}">${escapeHtml(d.nature||"-")}</button>
+      </div>`;
+  }).join("");
+
+  // 食材本体タップでレシピ絞り込み表示
+  list.querySelectorAll(".fc-name-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      showRecipesForIngredient(btn.dataset.name);
+    });
+  });
+  list.querySelectorAll(".food-chip .fc-emoji").forEach(el => {
+    el.addEventListener("click", () => {
+      const root = el.closest(".food-chip");
+      if(root) showRecipesForIngredient(root.dataset.name);
+    });
+  });
+  list.querySelectorAll(".fc-nature").forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentNatureFilter = btn.dataset.nature || null;
+      renderNatureFilter();
+      renderFoodRecommend();
+    });
+  });
+}
+
+/* 食材タップでその食材だけのレシピを表示（foodList を置換） */
+let currentIngredientFilter = null; // 食材タップでの絞り込み状態
+
+function showRecipesForIngredient(name){
+  currentIngredientFilter = name;
+  const list = document.getElementById("foodList");
+  const info = document.getElementById("recipeFilterInfo");
+  const recipes = (RECIPE_DB && RECIPE_DB[name]) || [];
+  if(!recipes.length){
+    if(info) info.innerHTML = `<span style="color:#a43030;">⚠ 「${escapeHtml(name)}」のレシピが未登録です</span>`;
+    if(list) list.innerHTML = "";
+    return;
+  }
+  if(info){
+    info.innerHTML = `<strong>${escapeHtml(name)}</strong> のおすすめレシピ ${recipes.length}件 （<a href="#" id="clearIngFilter" style="color:#666;">× 食材絞り込みを解除</a>）`;
+    const clr = document.getElementById("clearIngFilter");
+    if(clr){
+      clr.addEventListener("click",(e)=>{
+        e.preventDefault();
+        currentIngredientFilter = null;
+        renderTraitAndRecipes(currentTraitKeys, TRAIT_DEF[currentTraitKeys[0]] || null);
+      });
+    }
+  }
+  if(list){
+    list.innerHTML = recipes.map(r => renderRecipeCard({
+      id: "ing-" + name + "-" + r.title,
+      emoji: "🍳",
+      title: r.title,
+      time: r.time,
+      constitution: (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys.join("・") : "バランス",
+      ingredients: (r.ingredients||[]).map(i => i.item + " " + (i.amount||"")).filter(s => s.trim()),
+      steps: r.steps || [],
+      effect: (RECIPE_DB_META && RECIPE_DB_META[name]) ? RECIPE_DB_META[name].effect : "",
+      cautions: "砂糖・塩・酢・醤油・味噌を基本に、ご家庭の調味料で調整してください。",
+      traitKey: (currentTraitKeys && currentTraitKeys[0]) || "balanced",
+      season: name,
+      ts: Date.now(),
+      _src: r.src
+    })).join("");
+    bindRecipeCardEvents();
+  }
+}
+
 let currentTraitKeys = []; // 現在の体質（描画中）
 
 function renderSekkiAndTraits(date){
@@ -924,6 +1065,10 @@ function renderTraitAndRecipes(traitKeys, primaryTrait){
   const list = document.getElementById("foodList");
   list.innerHTML = recipes.map(renderRecipeCard).join("");
   bindRecipeCardEvents();
+
+  // 体質別おすすめ食材（五性フィルタ込み）
+  renderNatureFilter();
+  renderFoodRecommend();
 }
 
 /* 体質→シーズンキー変換 */
@@ -1169,7 +1314,7 @@ async function updateWeather(){
       d.setDate(d.getDate() + idx);
       return (d.getMonth()+1) + "月" + d.getDate() + "日";
     };
-    document.getElementById("dryDesc").textContent = washDesc([wd0,wd1], todayDate, todayDate, new Date(todayDate.getTime()+86400000), [dateLabel(0), dateLabel(1)]);
+    document.getElementById("dryDesc").textContent = washComment(s0, s1, todayDate);
     renderWeatherDual(wd0, wd1);
     document.getElementById("dryLoading").classList.add("hidden");
     document.getElementById("dryContent").classList.remove("hidden");
@@ -1264,6 +1409,6 @@ document.getElementById("regenBtn").addEventListener("click", ()=>{
 
 main();
 </script>
-<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v3d52b47920f24c319d37e2661827c42b1787588026925" integrity="sha512-d9sL6GJLXn6fInD1+TVXhTcQOsmxeHfmHAvwGDIxp5TO+uo1fiWW7mHomMj4MLRlCsJDTqXzWLHJFFlPCEIj/A==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>

@@ -556,71 +556,138 @@ function pickWeighted(items, weightFn){
   return items[items.length-1];
 }
 
+
+/* 補助関数・セルフチェックデータ */
+function escapeHtml(value){
+  return String(value ?? "").replace(/[&<>\"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'": "&#39;"}[ch]));
+}
+
+const EFFECT_TEXT = {
+  keistai:"気の巡りを整え、ストレスによる張りや重さをやわらげる方向の食養生です。",
+  shitsunetsu:"余分な熱と湿をため込まないよう、さっぱりした食材を中心に整えます。",
+  tanshitsu:"脾胃をいたわり、余分な水分をため込まないように整えます。",
+  kiinkyo:"気と潤いを同時に補い、消耗しすぎないように整えます。",
+  inkyo:"不足しがちな潤いを補い、乾燥やほてりに配慮します。",
+  yokyo:"体を冷やしすぎないよう、温めて巡らせる食養生を意識します。",
+  qixu:"気を補って疲れやすさを支え、脾胃に負担をかけない食養生です。",
+  xuexu:"血を養い、乾燥や目の疲れに配慮した食養生です。",
+  xueyu:"血の巡りを助け、冷えによるこわばりに配慮した食養生です."
+};
+
+// DATASET_DB をレシピ生成用の形式に変換。DB内の五性・五味・帰経をそのまま利用します。
+function datasetToPool(){
+  return (typeof DATASET_DB === "undefined" ? [] : DATASET_DB).map(d => ({
+    name:d.name, emoji:d.emoji||"🍽", cat:d.cat||"other", nature:d.nature||"平",
+    flavors:d.flavors||[], meridians:d.meridians||[], effect:d.effect||"",
+    constitutions:[], mainOk:true
+  }));
+}
+
+function recipePoolForTrait(traitKey){
+  const base=datasetToPool();
+  const prio=NATURE_PRIORITY[traitKey]||["平","温","涼","寒","熱"];
+  const preferred=base.filter(x=>prio.includes(x.nature) && RECIPE_DB && RECIPE_DB[x.name]);
+  return preferred.length ? preferred : base.filter(x=>RECIPE_DB && RECIPE_DB[x.name]);
+}
+
+function renderCheckQuestions(){
+  const box=document.getElementById("checkQuestions");
+  if(!box) return;
+  box.innerHTML=CHECK_QUESTIONS.map((q,qi)=>`
+    <div class="q-block">
+      <div class="q-title">${qi+1}. ${escapeHtml(q.title)}</div>
+      <div class="q-text">${escapeHtml(q.text)}</div>
+      <div class="q-options">${q.options.map((op,oi)=>`<button type="button" class="q-opt" data-q="${qi}" data-o="${oi}">${escapeHtml(op.label)}</button>`).join("")}</div>
+    </div>`).join("");
+  box.querySelectorAll(".q-opt").forEach(btn=>btn.addEventListener("click",()=>{
+    const q=+btn.dataset.q;
+    box.querySelectorAll(`.q-opt[data-q="${q}"]`).forEach(x=>x.classList.remove("active"));
+    btn.classList.add("active");
+    checkAnswers[q]=+btn.dataset.o;
+  }));
+}
+
+const CHECK_QUESTIONS=[
+  {title:"疲れ方",text:"少し動くだけで疲れやすく、休むと回復しやすいですか？",options:[
+    {label:"ない",traits:{}},{label:"少し",traits:{qixu:1}},{label:"かなり",traits:{qixu:2}}]},
+  {title:"冷え",text:"手足や腰が冷えやすく、寒さが苦手ですか？",options:[
+    {label:"ない",traits:{}},{label:"少し",traits:{yokyo:1}},{label:"かなり",traits:{yokyo:2}}]},
+  {title:"乾燥・ほてり",text:"喉や肌が乾きやすく、ほてり・寝汗が気になりますか？",options:[
+    {label:"ない",traits:{}},{label:"少し",traits:{inkyo:1}},{label:"かなり",traits:{inkyo:2}}]},
+  {title:"むくみ・重だるさ",text:"むくみや体の重だるさ、頭の重さを感じやすいですか？",options:[
+    {label:"ない",traits:{}},{label:"少し",traits:{tanshitsu:1}},{label:"かなり",traits:{tanshitsu:2}}]},
+  {title:"イライラ・ため息",text:"ストレスで胸がつかえたり、ため息やイライラが出やすいですか？",options:[
+    {label:"ない",traits:{}},{label:"少し",traits:{keistai:1}},{label:"かなり",traits:{keistai:2}}]},
+  {title:"湿熱",text:"口のねばつき・口臭・肌荒れ・便秘・尿の濃さが気になりますか？",options:[
+    {label:"ない",traits:{}},{label:"少し",traits:{shitsunetsu:1}},{label:"かなり",traits:{shitsunetsu:2}}]}
+];
+let checkAnswers=Array(CHECK_QUESTIONS.length).fill(-1);
+let checkResultTraits=[];
+
+function runCheckDiagnosis(){
+  const scores={};
+  CHECK_QUESTIONS.forEach((q,i)=>{
+    const oi=checkAnswers[i]; if(oi<0) return;
+    Object.entries(q.options[oi].traits).forEach(([k,v])=>scores[k]=(scores[k]||0)+v);
+  });
+  const ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+  checkResultTraits=ranked.length ? ranked.slice(0,3).map(x=>x[0]).filter(k=>xScore(scores,k)) : ["keistai"];
+  if(!ranked.length){ checkResultTraits=[]; }
+  const result=document.getElementById("checkResult");
+  if(result){
+    if(!ranked.length){
+      result.innerHTML=`<div class="check-result-title">バランス型</div><div class="check-result-score">症状の選択がないため、今回は「症状なし（バランス型）」として扱います。</div><div class="check-result-desc">特定の体質に偏らない食事を基本に、季節と体調に合わせて調整しましょう。</div>`;
+    }else{
+      const top=checkResultTraits[0];
+      result.innerHTML=`<div class="check-result-title">${escapeHtml(TRAIT_DEF[top].label)}</div><div class="check-result-score">${checkResultTraits.map(k=>escapeHtml(TRAIT_DEF[k].label)+"："+scores[k]).join(" / ")}</div><div class="check-result-desc">${escapeHtml(TRAIT_DEF[top].summary)}</div>`;
+    }
+    result.classList.remove("hidden");
+  }
+  const gen=document.getElementById("genByCheckBtn"); if(gen) gen.style.display="block";
+}
+function xScore(scores,k){ return (scores[k]||0)>0; }
+
 function generateRecipe(traitKey, season){
-  const trait = TRAIT_DEF[traitKey];
-  const pool = ING_POOL.filter(x => x.constitutions.includes(traitKey));
+  const trait = TRAIT_DEF[traitKey] || TRAIT_DEF.keistai;
+  const pool = recipePoolForTrait(traitKey);
+  const allPool = pool.length ? pool : datasetToPool();
+  if(!allPool.length) throw new Error("薬膳食材DBが空です");
 
-  // 主食材を選ぶ（mainOk:true のうちランダム）
-  let mainPool = pool.filter(x => x.mainOk);
-  if(mainPool.length===0) mainPool = pool;
-  const main = pick(mainPool);
+  const prio = NATURE_PRIORITY[traitKey] || ["平","温","涼","寒","熱"];
+  const sorted = allPool.slice().sort((a,b)=>prio.indexOf(a.nature)-prio.indexOf(b.nature));
+  const main = pick(sorted.slice(0, Math.min(10,sorted.length))) || sorted[0];
+  const subCandidates = allPool.filter(x => x.name!==main.name && x.cat!==main.cat);
+  const sub = pick(subCandidates.length ? subCandidates : allPool.filter(x=>x.name!==main.name)) || main;
 
-  // 副食材を1〜2つ（同カテゴリ以外を避ける）
-  const subCandidates = pool.filter(x => x.name!==main.name && x.cat!==main.cat);
-  const sub = pickWeighted(subCandidates, x => x.constitutions.filter(c=>c===traitKey).length + 1);
-
-  // 調理法を選ぶ
+  // 既存DBレシピがある食材は、実登録レシピを優先。
+  const baseRecipe = RECIPE_DB && RECIPE_DB[main.name] ? pick(RECIPE_DB[main.name]) : null;
   const method = pick(COOK_METHODS);
+  const seasoningStr = (SEASONING_SETS[traitKey] || SEASONING_SETS.keistai)[Math.floor(Math.random()*(SEASONING_SETS[traitKey] || SEASONING_SETS.keistai).length)];
 
-  // 調味料セット
-  const seasoningStr = pick(SEASONING_SETS[traitKey]);
-
-  // 手順テンプレート展開
-  let steps = method.template.map(t => t
-    .replace(/\{main\}/g, main.name)
-    .replace(/\{sub\}/g, sub.name)
-    .replace(/\{seasoning\}/g, seasoningStr)
-    .replace(/\{sweetening\}/g, "砂糖大さじ1〜2")
-    .replace(/\{finish\}/g, "長ねぎの小口切り")
-    .replace(/\{water\}/g, "水")
-  );
-  // 共通の前置き（食材の下処理）
-  const prep = method.id==="sugar_boil" || method.id==="salad" ? "" : (`{main}と{sub}を食べやすい大きさに切る。`);
-  if(prep){
-    steps = [prep.replace(/\{main\}/g, main.name).replace(/\{sub\}/g, sub.name), ...steps];
+  let ingredients, steps, title, time, effect, cautions;
+  if(baseRecipe){
+    ingredients = baseRecipe.ingredients || [];
+    steps = baseRecipe.steps || [];
+    title = `${baseRecipe.title}（${trait.label}向け）`;
+    time = baseRecipe.time || "約15分";
+    effect = (main.effect || EFFECT_TEXT[traitKey] || "") + " " + (EFFECT_TEXT[traitKey] || "");
+    cautions = trait.cautions;
+  }else{
+    let methodSteps = method.template.map(t => t.replace(/\{main\}/g,main.name).replace(/\{sub\}/g,sub.name).replace(/\{seasoning\}/g,seasoningStr).replace(/\{sweetening\}/g,"砂糖大さじ1〜2").replace(/\{finish\}/g,"長ねぎの小口切り").replace(/\{water\}/g,"水"));
+    if(method.id!=="sugar_boil" && method.id!=="salad") methodSteps=[`${main.name}と${sub.name}を食べやすい大きさに切る。`,...methodSteps];
+    ingredients=[{item:main.name,amount:pickAmount(main.cat,"main")},{item:sub.name,amount:pickAmount(sub.cat,"sub")},...parseSeasoning(seasoningStr)];
+    if(method.need.includes("oil")) ingredients.push({item:pick(OIL_SETS),amount:"大さじ1"});
+    if(method.need.includes("water")) ingredients.push({item:"水",amount:pick(["400ml","500ml","800ml"])});
+    steps=methodSteps;
+    title=makeTitle(main,sub,method,traitKey); time=method.time;
+    effect=(main.effect || "") + " " + (EFFECT_TEXT[traitKey] || "") + (SEASON_EFFECT[season]||"");
+    cautions=trait.cautions;
   }
 
-  // 材料リスト（分量）
-  const ingredients = [];
-  ingredients.push({ item:main.name, amount: pickAmount(main.cat, "main") });
-  ingredients.push({ item:sub.name, amount: pickAmount(sub.cat, "sub") });
-  // 調味料を分解
-  const seasonItems = parseSeasoning(seasoningStr);
-  seasonItems.forEach(s => ingredients.push({ item:s.name, amount:s.amount }));
-  // 油・水
-  if(method.need.includes("oil")) ingredients.push({ item: pick(OIL_SETS), amount:"大さじ1" });
-  if(method.need.includes("water")) ingredients.push({ item:"水", amount: pick(["400ml","500ml","800ml"]) });
-
-  // タイトル生成
-  const title = makeTitle(main, sub, method, traitKey);
-
-  // 季節効果
-  const seasonEffect = SEASON_EFFECT[season] || "";
-
   return {
-    id: "gen_" + Date.now() + "_" + Math.random().toString(36).slice(2,8),
-    emoji: main.emoji,
-    title: title,
-    time: method.time,
-    constitution: trait.label,
-    ingredients: ingredients,
-    steps: steps,
-    effect: EFFECT_TEXT[traitKey] + seasonEffect,
-    cautions: trait.cautions,
-    isGenerated: true,
-    traitKey: traitKey,
-    season: season,
-    generatedAt: new Date().toISOString()
+    id:"gen_"+Date.now()+"_"+Math.random().toString(36).slice(2,8),
+    emoji:main.emoji||"🍽", title, time, constitution:trait.label, ingredients, steps,
+    effect, cautions, isGenerated:true, traitKey, season, generatedAt:new Date().toISOString()
   };
 }
 
@@ -866,108 +933,549 @@ let DATASET_DB = [
   { name:"あさり", emoji:"🥩", cat:"meat", nature:"寒", flavors:["甘", "鹹"], meridians:["肝", "腎"], effect:"清熱化痰、利水", traits:["balanced"], season:"春・夏", cook:"汁物・酒蒸し" },
 ];
 
-/* ============================================================
-   7-c. 実行に必要な共通データ・関数
-   ============================================================ */
-function escapeHtml(value){
-  return String(value ?? "")
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;")
-    .replace(/'/g,"&#39;");
+let RECIPE_DB = {"羊肉": [{"title": "ラム肉のピリ辛味噌炒め", "time": "約15分", "src": "housefoods.jp/recipe/rcp_00008064.html", "ingredients": [{"item": "羊肉(ラム)", "amount": "200g"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "玉ねぎ", "amount": "1/2個"}, {"item": "人参", "amount": "1/3本"}, {"item": "油", "amount": "大さじ1"}], "steps": ["野菜を食べやすい大きさに切る", "フライパンに油を熱し羊肉を炒める", "野菜を加えてさらに炒め、合わせた調味料で味付けする"]}], "シナモン": [{"title": "シナモンティー", "time": "約5分", "src": "delishkitchen.tv/recipes/375469891957817785", "ingredients": [{"item": "紅茶(ティーバッグ)", "amount": "1袋"}, {"item": "シナモン(スティック)", "amount": "1本"}, {"item": "砂糖", "amount": "お好み"}, {"item": "熱湯", "amount": "150ml"}], "steps": ["カップにティーバッグとシナモンを入れる", "熱湯を注ぎ3〜5分蒸らす", "砂糖を加えて混ぜる"]}], "唐辛子": [{"title": "甘くない麻婆豆腐", "time": "約15分", "src": "delishkitchen.tv/recipes/168896990107664787", "ingredients": [{"item": "木綿豆腐", "amount": "1丁(300g)"}, {"item": "豚ひき肉", "amount": "100g"}, {"item": "長ねぎ", "amount": "1/2本"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "唐辛子", "amount": "お好み"}, {"item": "ごま油", "amount": "小さじ2"}], "steps": ["豆腐は1.5cm角に切る", "フライパンでごま油を熱し、豚ひき肉とねぎを炒める", "味噌・醤油・砂糖・唐辛子を混ぜた調味料を加え、豆腐を炒め合わせる"]}], "黒こしょう": [{"title": "塩こしょうスープ", "time": "約5分", "src": "ameblo.jp/syunkon/entry-12914363103.html", "ingredients": [{"item": "水", "amount": "300ml"}, {"item": "塩", "amount": "小さじ1/4"}, {"item": "砂糖", "amount": "ひとつまみ"}, {"item": "醤油", "amount": "数滴"}, {"item": "黒こしょう", "amount": "適量"}, {"item": "ごま油", "amount": "数滴"}], "steps": ["鍋に水を入れて火にかける", "塩・砂糖・醤油・黒こしょうで調味する", "仕上げにごま油を数滴たらす"]}], "みかん": [{"title": "みかんマーマレード", "time": "約30分", "src": "oceans-nadia.com/user/10254/recipe/135590", "ingredients": [{"item": "みかん", "amount": "3個"}, {"item": "砂糖", "amount": "300g"}], "steps": ["みかんを薄切りにする", "鍋にみかんと砂糖を入れ30分〜1時間置く", "弱火で煮詰める"]}], "桃": [{"title": "桃のコンポート(レンジ)", "time": "約5分", "src": "oceans-nadia.com/user/23188/recipe/396403", "ingredients": [{"item": "桃", "amount": "1個"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "レモン汁", "amount": "少々"}], "steps": ["桃を6等分に切る", "耐熱ボウルに入れ砂糖とレモン汁をふる", "ラップをかけてレンジ600Wで2分加熱"]}], "黒糖": [{"title": "黒糖くるみ", "time": "約5分", "src": "cotta.jp/recipe/recipe.php?recipeid=00020814", "ingredients": [{"item": "くるみ", "amount": "80g"}, {"item": "黒糖", "amount": "30g"}, {"item": "水", "amount": "大さじ1/2"}], "steps": ["くるみをから煎りする", "フライパンに黒糖と水を入れて加熱", "黒糖が溶けたらくるみを絡める"]}], "くるみ": [{"title": "黒糖くるみ", "time": "約5分", "src": "cotta.jp/recipe/recipe.php?recipeid=00020814", "ingredients": [{"item": "くるみ", "amount": "80g"}, {"item": "黒糖", "amount": "30g"}, {"item": "水", "amount": "大さじ1/2"}], "steps": ["くるみをから煎りする", "フライパンに黒糖と水を入れて加熱", "黒糖が溶けたらくるみを絡める"]}], "松の実": [{"title": "水菜ときゅうりの松の実サラダ", "time": "約5分", "src": "kikkoman.co.jp/homecook/search/recipe/00002385/", "ingredients": [{"item": "水菜", "amount": "1袋"}, {"item": "きゅうり", "amount": "1本"}, {"item": "松の実", "amount": "大さじ1"}, {"item": "ごま油", "amount": "小さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "酢", "amount": "小さじ1"}, {"item": "砂糖", "amount": "ひとつまみ"}], "steps": ["水菜ときゅうりを食べやすく切る", "小松の実をごま油で炒める", "全部ボウルでざっくり和える"]}], "栗": [{"title": "栗ときのこの炊き込みご飯", "time": "約15分", "src": "oceans-nadia.com/user/279721/recipe/400594", "ingredients": [{"item": "米", "amount": "3合"}, {"item": "むき栗", "amount": "200g"}, {"item": "しめじ", "amount": "1パック"}, {"item": "にんじん", "amount": "30g"}, {"item": "油揚げ", "amount": "1/2枚"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "塩", "amount": "小さじ1"}], "steps": ["米を研いで炊飯器に入れる", "具材と調味料を加える", "通常モードで炊飯する"]}], "もち米": [{"title": "鶏肉のもち米粥", "time": "約15分(炊飯)", "src": "recipe.yamasa.com/recipes/4553", "ingredients": [{"item": "もち米", "amount": "1/2合"}, {"item": "鶏肉", "amount": "100g"}, {"item": "生姜", "amount": "1片"}, {"item": "塩", "amount": "小さじ1/3"}, {"item": "醤油", "amount": "小さじ1"}], "steps": ["鍋にもち米・水・酒・鶏肉・生姜を入れる", "ふたをして40分煮る", "塩・醤油で味を調える"]}], "鶏肉": [{"title": "鶏もも肉ともやしのガーリック醤油炒め", "time": "約15分", "src": "oceans-nadia.com/user/111095/recipe/393618", "ingredients": [{"item": "鶏もも肉", "amount": "1枚(約300g)"}, {"item": "もやし", "amount": "1袋"}, {"item": "醤油", "amount": "大さじ1と1/2"}, {"item": "ごま油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "黒こしょう", "amount": "少々"}], "steps": ["鶏肉を一口大に切る", "フライパンでごま油を熱し鶏肉を炒める", "もやしを加えて炒め、調味料で味付け"]}], "鹿肉": [{"title": "鹿肉のすき焼き風", "time": "約15分", "src": "yakuzen-komachi.jp/dictionary", "ingredients": [{"item": "鹿肉", "amount": "150g"}, {"item": "白菜", "amount": "1/4株"}, {"item": "長ねぎ", "amount": "1本"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "油", "amount": "大さじ1"}], "steps": ["野菜を切る", "フライパンに油を熱し鹿肉を炒める", "調味料を加え野菜と煮る"]}], "味噌": [{"title": "即席ねぎ味噌汁", "time": "約5分", "src": "oceans-nadia.com/user/82993/recipe/381839", "ingredients": [{"item": "長ねぎ", "amount": "1本"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "水", "amount": "400ml"}], "steps": ["鍋に水を入れて沸かす", "長ねぎを斜め切りにして加える", "味噌を溶き入れる"]}], "酢": [{"title": "きゅうりの酢の物", "time": "約5分", "src": "oceans-nadia.com/user/28/recipe/459423", "ingredients": [{"item": "きゅうり", "amount": "2本"}, {"item": "酢", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "塩", "amount": "少々"}], "steps": ["きゅうりを切る", "調味料を合わせる", "ビニール袋に入れてもみ込む"]}], "かぼちゃ": [{"title": "かぼちゃの煮物（砂糖醤油）", "time": "約15分", "src": "oceans-nadia.com/user/259228/recipe/419794", "ingredients": [{"item": "かぼちゃ", "amount": "300g"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "水", "amount": "125ml"}], "steps": ["かぼちゃを2〜3cmに切る", "耐熱ボウルに調味料とかぼちゃを入れる", "ラップしてレンジ600Wで8分加熱"]}], "玉ねぎ": [{"title": "玉ねぎと卵のスープ", "time": "約10分", "src": "oceans-nadia.com/user/765465/recipe/443146", "ingredients": [{"item": "玉ねぎ", "amount": "1/2個"}, {"item": "卵", "amount": "1個"}, {"item": "水", "amount": "400ml"}, {"item": "醤油", "amount": "小さじ1/2"}, {"item": "塩", "amount": "少々"}, {"item": "黒こしょう", "amount": "少々"}], "steps": ["玉ねぎを薄切りにする", "鍋に水と玉ねぎを入れ煮る", "溶き卵を回し入れ、醤油で調味"]}], "コーヒー": [{"title": "ブラックコーヒー", "time": "約5分", "src": "delishkitchen.tv/recipes/247474260547732586", "ingredients": [{"item": "コーヒー豆", "amount": "10g"}, {"item": "砂糖", "amount": "お好み"}], "steps": ["ドリッパーにフィルターをセット", "挽いた豆を入れお湯を注ぐ", "お好みで砂糖を加える"]}], "紅茶": [{"title": "ジンジャーティー", "time": "約5分", "src": "delishkitchen.tv/recipes/294432142044169294", "ingredients": [{"item": "紅茶(ティーバッグ)", "amount": "1袋"}, {"item": "生姜", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "熱湯", "amount": "200ml"}], "steps": ["生姜をすりおろす", "カップに紅茶と生姜を入れる", "熱湯を注ぎ砂糖を加える"]}], "にんにく": [{"title": "にんにく醤油だれ", "time": "約5分", "src": "oceans-nadia.com/user/111095/recipe/393618", "ingredients": [{"item": "にんにく", "amount": "1片"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "ごま油", "amount": "小さじ1"}], "steps": ["にんにくをみじん切りにする", "調味料と合わせる", "肉や野菜にかけて使う"]}], "生姜": [{"title": "生姜紅茶", "time": "約5分", "src": "delishkitchen.tv/recipes/294432142044169294", "ingredients": [{"item": "紅茶(ティーバッグ)", "amount": "1袋"}, {"item": "生姜", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "熱湯", "amount": "200ml"}], "steps": ["生姜をすりおろす", "カップに紅茶と生姜を入れる", "熱湯を注ぎ砂糖を加える"]}], "長ねぎ": [{"title": "即席ねぎ味噌汁", "time": "約5分", "src": "oceans-nadia.com/user/82993/recipe/381839", "ingredients": [{"item": "長ねぎ", "amount": "1本"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "水", "amount": "400ml"}, {"item": "油揚げ", "amount": "1/2枚"}], "steps": ["鍋に水と油揚げを入れて沸かす", "長ねぎを斜め切りにして加える", "味噌を溶き入れる"]}], "えび": [{"title": "海老のガーリックバター醤油炒め", "time": "約15分", "src": "ebino-ya.jp/blogs/recipe/", "ingredients": [{"item": "むき海老", "amount": "125g"}, {"item": "にんにく", "amount": "2片"}, {"item": "バター", "amount": "20g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "黒こしょう", "amount": "少々"}, {"item": "油", "amount": "大さじ1"}], "steps": ["海老を解凍し水気を切る", "フライパンに油とにんにくを熱する", "海老を炒め、バターと醤油を加える"]}], "鮭": [{"title": "鮭のガーリックバターホイル焼き", "time": "約15分", "src": "oceans-nadia.com/user/749006/recipe/445770", "ingredients": [{"item": "生鮭", "amount": "2切れ"}, {"item": "舞茸", "amount": "1パック"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "小さじ2"}, {"item": "にんにく", "amount": "1片"}, {"item": "塩", "amount": "少々"}, {"item": "こしょう", "amount": "少々"}], "steps": ["鮭に塩こしょうをふる", "アルミホイルに鮭・舞茸・バター・にんにく・醤油をのせる", "包んでフライパンで15分蒸し焼き"]}], "鯖": [{"title": "鯖の味噌煮(レンジ)", "time": "約15分", "src": "ism.life/special/yamamoto001.html", "ingredients": [{"item": "鯖", "amount": "2切れ"}, {"item": "味噌", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "酒", "amount": "大さじ1"}], "steps": ["鯖の皮に浅く切れ込みを入れる", "調味料を耐熱容器に混ぜる", "鯖を加えてラップし、レンジで5分"]}], "しいたけ": [{"title": "椎茸バター醤油焼き", "time": "約10分", "src": "kagome.co.jp/vegeday/eat/202308/13641/", "ingredients": [{"item": "しいたけ", "amount": "8個"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "小さじ1/2"}, {"item": "黒こしょう", "amount": "少々"}, {"item": "油", "amount": "大さじ1"}], "steps": ["しいたけを食べやすく切る", "フライパンに油を熱し両面焼く", "バターと醤油を回しかける"]}], "しめじ": [{"title": "悪魔のきのこ(バター醤油)", "time": "約10分", "src": "delishkitchen.tv/recipes/528266863558263207", "ingredients": [{"item": "しめじ", "amount": "1パック"}, {"item": "しいたけ", "amount": "1パック"}, {"item": "えのき", "amount": "1袋"}, {"item": "にんにく", "amount": "2片"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "塩", "amount": "小さじ1/3"}, {"item": "こしょう", "amount": "少々"}], "steps": ["きのこをほぐす", "フライパンにバターとにんにくを熱する", "きのこを炒め醤油で調味"]}], "まいたけ": [{"title": "まいたけのバター醤油炒め", "time": "約10分", "src": "oceans-nadia.com/user/28/recipe/113848", "ingredients": [{"item": "まいたけ", "amount": "1パック"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "油", "amount": "大さじ1"}], "steps": ["まいたけをほぐす", "フライパンに油を熱しまいたけを炒める", "バターと醤油で調味"]}], "ぶどう": [{"title": "ぶどうコンポート", "time": "約15分", "src": "orangepage.net/recipes/303097", "ingredients": [{"item": "ぶどう", "amount": "1房"}, {"item": "砂糖", "amount": "大さじ3"}, {"item": "水", "amount": "200ml"}, {"item": "レモン汁", "amount": "小さじ1"}], "steps": ["ぶどうの皮を湯剥きする", "鍋に水・砂糖・レモン汁を入れる", "ぶどうを加えて20分煮る"]}], "梅": [{"title": "梅シロップ", "time": "約5分(仕込み)", "src": "on-the-slope.com/articles/recipe_all/recipe/articles-184491/", "ingredients": [{"item": "青梅", "amount": "1kg"}, {"item": "砂糖", "amount": "1kg"}], "steps": ["梅を洗って水気を拭く", "ヘタを取る", "梅と砂糖を交互にビンに入れる"]}], "はちみつ": [{"title": "ホットはちみつレモン", "time": "約5分", "src": "ito-noen.com/dictionary/recipe/", "ingredients": [{"item": "はちみつ", "amount": "大さじ1"}, {"item": "レモン果汁", "amount": "大さじ1"}, {"item": "熱湯", "amount": "150ml"}], "steps": ["カップにはちみつとレモン果汁を入れる", "熱湯を注ぐ", "軽く混ぜる"]}], "白砂糖": [{"title": "シュガートースト", "time": "約5分", "src": "oceans-nadia.com/user/1234942/recipe/508021", "ingredients": [{"item": "食パン", "amount": "1枚"}, {"item": "バター", "amount": "10g"}, {"item": "砂糖", "amount": "大さじ1"}], "steps": ["フライパンにバターを溶かす", "砂糖を入れる", "食パンをのせて両面焼く"]}], "ごま": [{"title": "ほうれん草のごま和え", "time": "約5分", "src": "sirogohan.com/recipe/hourensougomaae/", "ingredients": [{"item": "ほうれん草", "amount": "1束"}, {"item": "すりごま", "amount": "大さじ1と1/2"}, {"item": "砂糖", "amount": "小さじ1/2"}, {"item": "醤油", "amount": "大さじ1/2"}], "steps": ["ほうれん草をゆでて水気を絞る", "すりごまをすり、砂糖と醤油を混ぜる", "和える"]}], "黒ごま": [{"title": "黒ごまとうふ", "time": "約5分", "src": "yutori.co.jp/shop/rp/rp231757/", "ingredients": [{"item": "絹ごし豆腐", "amount": "1/2丁"}, {"item": "黒ごま", "amount": "大さじ2"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "醤油", "amount": "小さじ1"}], "steps": ["豆腐を1cm角に切る", "黒ごまをすって砂糖と醤油を混ぜる", "豆腐にかけて和える"]}], "玄米": [{"title": "海苔佃煮の炊き込みご飯", "time": "約15分", "src": "kaneko-nori.co.jp/recipe/takikomi-2/", "ingredients": [{"item": "玄米", "amount": "2合"}, {"item": "海苔の佃煮", "amount": "60g"}, {"item": "醤油", "amount": "大さじ1"}], "steps": ["玄米を研いで炊飯器に入れる", "海苔佃煮と醤油を加える", "通常モードで炊飯"]}], "米": [{"title": "卵の炊き込みご飯", "time": "約10分(炊飯)", "src": "buzzfeed.com/jp/maorikato/egg-rice", "ingredients": [{"item": "米", "amount": "2合"}, {"item": "卵", "amount": "2個"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "ごま油", "amount": "小さじ1"}], "steps": ["炊飯釜に米・調味料・卵を入れる", "2合の目盛りまで水を注ぐ", "通常モードで炊飯する"]}], "牛肉": [{"title": "牛肉ときのこのバター醤油炒め", "time": "約15分", "src": "cgc-kitchen365.jp/search/detail/66b33a853ae0083a0c1bc3f7", "ingredients": [{"item": "牛こま切れ肉", "amount": "200g"}, {"item": "エリンギ", "amount": "1パック"}, {"item": "えのき", "amount": "1袋"}, {"item": "にんにく", "amount": "1かけ"}, {"item": "バター", "amount": "30g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "黒こしょう", "amount": "少々"}, {"item": "油", "amount": "大さじ1"}], "steps": ["牛肉を切る", "フライパンにバターとにんにくを熱する", "牛肉ときのこを炒め醤油で調味"]}], "豚肉": [{"title": "白菜と豚バラの味噌炒め", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00058333/", "ingredients": [{"item": "豚バラ薄切り", "amount": "200g"}, {"item": "白菜", "amount": "1/4株"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "ごま油", "amount": "大さじ1"}], "steps": ["白菜を一口大に切る", "フライパンでごま油を熱し豚肉を炒める", "白菜を加えて調味料で味付け"]}], "鶏卵": [{"title": "玉ねぎと卵のスープ", "time": "約10分", "src": "oceans-nadia.com/user/765465/recipe/443146", "ingredients": [{"item": "鶏卵", "amount": "1個"}, {"item": "玉ねぎ", "amount": "1/2個"}, {"item": "水", "amount": "400ml"}, {"item": "醤油", "amount": "小さじ1/2"}, {"item": "塩", "amount": "少々"}], "steps": ["玉ねぎを薄切りにする", "鍋に水と玉ねぎを入れ煮る", "溶き卵を回し入れ醤油で調味"]}], "大豆": [{"title": "大豆の甘煮", "time": "約15分", "src": "kamada.co.jp/recipe/list/3158", "ingredients": [{"item": "水煮大豆", "amount": "100g"}, {"item": "だし醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ2"}], "steps": ["鍋に大豆・砂糖・水(少量)を入れる", "弱火で10分煮る", "醤油を加えひと煮立ち"]}], "小豆": [{"title": "小豆粥", "time": "約15分", "src": "cookpad.com/jp/recipes/21033655", "ingredients": [{"item": "小豆", "amount": "50g"}, {"item": "米", "amount": "1/2合"}, {"item": "水", "amount": "800ml"}, {"item": "砂糖", "amount": "お好み"}], "steps": ["小豆をゆでる", "炊飯釜に米・ゆでた小豆・煮汁を入れる", "おかゆモードで炊く"]}], "黒豆": [{"title": "黒豆の煮豆", "time": "約15分(圧力鍋)", "src": "sirogohan.com/recipe/kuromame/", "ingredients": [{"item": "黒豆", "amount": "200g"}, {"item": "砂糖", "amount": "200g"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "水", "amount": "1L"}], "steps": ["黒豆を一晩水に浸す", "鍋に黒豆・砂糖・水・醤油を入れる", "3〜4時間煮る"]}], "にんじん": [{"title": "にんじんのきんぴら", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00005339/", "ingredients": [{"item": "にんじん", "amount": "1本"}, {"item": "ごま油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "酒", "amount": "大さじ1"}], "steps": ["にんじんを細切りにする", "フライパンでごま油を熱し炒める", "砂糖・醤油・酒で調味"]}], "キャベツ": [{"title": "キャベツと豚こまの味噌炒め", "time": "約10分", "src": "oceans-nadia.com/user/749006/recipe/480158", "ingredients": [{"item": "キャベツ", "amount": "1/4玉"}, {"item": "豚こま切れ", "amount": "150g"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "大さじ1/2"}, {"item": "ごま油", "amount": "大さじ1"}], "steps": ["キャベツを食べやすく切る", "豚こまに塩こしょうを揉み込む", "ごま油で炒め合わせ調味料で味付け"]}], "白菜": [{"title": "白菜と豚バラの味噌炒め", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00058333/", "ingredients": [{"item": "白菜", "amount": "1/4株"}, {"item": "豚バラ薄切り", "amount": "200g"}, {"item": "味噌", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "ごま油", "amount": "大さじ1"}], "steps": ["白菜を一口大に切る", "フライパンでごま油を熱し豚肉、白菜の順で炒める", "味噌・醤油・砂糖で調味"]}], "牡蠣": [{"title": "牡蠣のバター醤油焼き", "time": "約10分", "src": "recipe.suntory.co.jp/recipe/007060", "ingredients": [{"item": "牡蠣(加熱用)", "amount": "10個"}, {"item": "塩", "amount": "適量"}, {"item": "こしょう", "amount": "適量"}, {"item": "小麦粉", "amount": "大さじ2"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "大さじ1/2"}, {"item": "油", "amount": "大さじ1"}], "steps": ["牡蠣を塩水で洗い水気をきる", "小麦粉をまぶす", "フライパンで両面焼き、バターと醤油"]}], "秋刀魚": [{"title": "さんまの塩焼き", "time": "約10分", "src": "kikkoman.co.jp/homecook/washoku/015/", "ingredients": [{"item": "秋刀魚", "amount": "2尾"}, {"item": "塩", "amount": "適量"}], "steps": ["さんまを洗い水気を拭く", "塩を両面にふる", "グリルまたはフライパンで両面焼く"]}], "鯛": [{"title": "鯛の酒蒸し", "time": "約10分", "src": "oceans-nadia.com/user/654099/recipe/458093", "ingredients": [{"item": "鯛(切り身)", "amount": "2切れ"}, {"item": "酒", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "塩", "amount": "少々"}, {"item": "生姜", "amount": "1片"}], "steps": ["鯛に塩をふり10分置く", "フライパンに酒と生姜を入れ鯛を乗せる", "ふたをして中火で5分蒸す、醤油をかける"]}], "いちご": [{"title": "いちごのコンポート", "time": "約15分", "src": "cookpad.com/jp/recipes/18362806", "ingredients": [{"item": "いちご", "amount": "1パック"}, {"item": "砂糖", "amount": "大さじ4"}, {"item": "レモン汁", "amount": "大さじ1"}], "steps": ["いちごを洗いヘタを取る", "鍋にいちご・砂糖・レモン汁を入れる", "弱火で10分煮る"]}], "りんご": [{"title": "りんごのコンポート(バター風味)", "time": "約10分", "src": "poundlikes.com/apple-compote-butter/", "ingredients": [{"item": "りんご", "amount": "1個"}, {"item": "バター", "amount": "10g"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "レモン汁", "amount": "小さじ1"}], "steps": ["りんごをくし切りにする", "フライパンにバターを溶かす", "りんご・砂糖・レモン汁を入れ弱火で10分"]}], "オレンジ": [{"title": "オレンジマーマレード", "time": "約30分", "src": "delishkitchen.tv/recipes/247474260547732586", "ingredients": [{"item": "オレンジ", "amount": "2個"}, {"item": "砂糖", "amount": "200g"}, {"item": "レモン果汁", "amount": "大さじ1"}], "steps": ["オレンジを薄切りにする", "鍋にオレンジ・砂糖・レモン果汁を入れる", "30分置いてから中火で15分煮る"]}], "そば": [{"title": "かけそば", "time": "約10分", "src": "kikkoman.co.jp/homecook/search/recipe/00002758/", "ingredients": [{"item": "そば", "amount": "1人分"}, {"item": "水", "amount": "300ml"}, {"item": "醤油", "amount": "大さじ2"}, {"item": "みりん", "amount": "大さじ2"}, {"item": "砂糖", "amount": "小さじ1"}, {"item": "長ねぎ", "amount": "1/4本"}], "steps": ["そばをゆでる", "鍋に水・醤油・みりん・砂糖でつゆを作る", "器にそばを盛りつゆをかけ刻みねぎを散らす"]}], "はと麦": [{"title": "はと麦茶", "time": "約5分", "src": "agripick.com/10251", "ingredients": [{"item": "はと麦", "amount": "大さじ1"}, {"item": "水", "amount": "200ml"}], "steps": ["やかんにはと麦と水を入れる", "沸騰したら弱火で3〜5分煮出す", "茶こしでこす"]}], "小麦": [{"title": "お好み焼き", "time": "約15分", "src": "nisshin.com/entertainment/komugiko_club/okonomiyaki_kansai/", "ingredients": [{"item": "薄力粉", "amount": "100g"}, {"item": "水", "amount": "150ml"}, {"item": "キャベツ", "amount": "300g"}, {"item": "卵", "amount": "1個"}, {"item": "お好み焼きソース", "amount": "適量"}, {"item": "マヨネーズ", "amount": "適量"}], "steps": ["薄力粉と水を混ぜ生地を作る", "キャベツを千切りにして加える", "ホットプレートで両面焼き、ソースとマヨ"]}], "豆腐": [{"title": "崩し豆腐ともやしのスープ", "time": "約10分", "src": "oceans-nadia.com/user/22780/recipe/385856", "ingredients": [{"item": "絹ごし豆腐", "amount": "1/2丁"}, {"item": "もやし", "amount": "1袋"}, {"item": "水", "amount": "400ml"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "醤油", "amount": "小さじ1"}], "steps": ["鍋に水を入れ沸かす", "もやしと手で崩した豆腐を加える", "味噌を溶き、醤油で調味"]}], "ほうれん草": [{"title": "ほうれん草のごま和え", "time": "約5分", "src": "sirogohan.com/recipe/hourensougomaae/", "ingredients": [{"item": "ほうれん草", "amount": "1束"}, {"item": "すりごま", "amount": "大さじ1と1/2"}, {"item": "醤油", "amount": "大さじ1/2"}, {"item": "砂糖", "amount": "小さじ1/2"}], "steps": ["ほうれん草を塩ゆでして水気を絞る", "すりごまをすり、砂糖と醤油を混ぜる", "ほうれん草を和える"]}], "大根": [{"title": "豚バラ大根の甘辛味噌煮", "time": "約15分", "src": "orangepage.net/news-daily/17492", "ingredients": [{"item": "豚バラ薄切り", "amount": "200g"}, {"item": "大根", "amount": "300g"}, {"item": "味噌", "amount": "大さじ2"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "水", "amount": "200ml"}], "steps": ["大根を乱切り、豚肉を切る", "鍋に水・大根を入れ5分煮る", "豚肉と味噌・醤油・砂糖を加え10分"]}], "トマト": [{"title": "トマトのコンポート", "time": "約10分", "src": "oishi-kenko.com/recipes/13185", "ingredients": [{"item": "ミニトマト", "amount": "200g"}, {"item": "砂糖", "amount": "大さじ2"}, {"item": "水", "amount": "100ml"}], "steps": ["ミニトマトのヘタを取る", "鍋に水・砂糖を沸かす", "トマトを入れ弱火で10分"]}], "えのき": [{"title": "えのきバター醤油炒め", "time": "約10分", "src": "kurashiru.com/recipes/4a184210-5502-4880-b9bd-91c74d38acd2", "ingredients": [{"item": "えのき", "amount": "1袋"}, {"item": "バター", "amount": "10g"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "塩", "amount": "少々"}, {"item": "こしょう", "amount": "少々"}], "steps": ["えのきを半分に切ってほぐす", "フライパンでバターを溶かす", "えのきを炒め醤油で調味"]}], "梨": [{"title": "梨のコンポート", "time": "約15分", "src": "ja-mienaka.or.jp/recipe/nashicompote/", "ingredients": [{"item": "梨", "amount": "1個"}, {"item": "砂糖", "amount": "大さじ3"}, {"item": "水", "amount": "200ml"}, {"item": "レモン汁", "amount": "小さじ1"}], "steps": ["梨を16等分に切り芯を取る", "鍋に水・砂糖・レモン汁を沸かす", "梨を入れ弱火で10分"]}], "醤油": [{"title": "だし醤油活用の卵かけご飯", "time": "約5分", "src": "mizkan.co.jp/ouchirecipe/recipe/?menu_id=22771", "ingredients": [{"item": "ご飯", "amount": "1人分"}, {"item": "卵", "amount": "1個"}, {"item": "醤油", "amount": "大さじ1〜2"}], "steps": ["ご飯を器に盛る", "卵を割り入れる", "醤油をかけて混ぜる"]}], "緑豆": [{"title": "緑豆春雨スープ", "time": "約10分", "src": "oceans-nadia.com/user/279721/recipe/404131", "ingredients": [{"item": "緑豆春雨", "amount": "30g"}, {"item": "水", "amount": "1000ml"}, {"item": "醤油", "amount": "大さじ1"}, {"item": "塩", "amount": "少々"}, {"item": "ごま油", "amount": "小さじ1"}], "steps": ["鍋に水・春雨を入れ3〜4分煮る", "醤油・塩で調味", "仕上げにごま油"]}], "きゅうり": [{"title": "きゅうりの酢の物", "time": "約5分", "src": "oceans-nadia.com/user/28/recipe/459423", "ingredients": [{"item": "きゅうり", "amount": "2本"}, {"item": "酢", "amount": "大さじ2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "小さじ1"}, {"item": "塩", "amount": "少々"}], "steps": ["きゅうりを切る", "調味料を合わせる", "ビニール袋に入れて15分置く"]}], "ごぼう": [{"title": "きんぴらごぼう", "time": "約10分", "src": "delishkitchen.tv/recipes/143452682072359331", "ingredients": [{"item": "ごぼう", "amount": "1本(180g)"}, {"item": "にんじん", "amount": "1/3本"}, {"item": "ごま油", "amount": "大さじ1/2"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1と1/2"}, {"item": "酒", "amount": "30ml"}], "steps": ["ごぼう・にんじんを細切りにする", "フライパンでごま油を熱し炒める", "砂糖・醤油・酒で調味"]}], "なす": [{"title": "なすとピーマンの味噌炒め", "time": "約15分", "src": "erecipe.woman.excite.co.jp/detail/490da2df8b1baeb4e2b467c9fdf90330.html", "ingredients": [{"item": "なす", "amount": "3本"}, {"item": "ピーマン", "amount": "2個"}, {"item": "味噌", "amount": "大さじ1.5"}, {"item": "砂糖", "amount": "大さじ1.5"}, {"item": "醤油", "amount": "大さじ1/2"}, {"item": "ごま油", "amount": "少々"}, {"item": "油", "amount": "大さじ2"}], "steps": ["なす・ピーマンを切る", "フライパンに油を熱しなすを炒める", "ピーマンと調味料を加え炒め合わせる"]}], "れんこん": [{"title": "れんこんのきんぴら", "time": "約10分", "src": "sirogohan.com/recipe/renkonkinpira/", "ingredients": [{"item": "れんこん", "amount": "1節(240g)"}, {"item": "ごま油", "amount": "大さじ1"}, {"item": "砂糖", "amount": "大さじ1"}, {"item": "醤油", "amount": "大さじ1と1/2"}, {"item": "酒", "amount": "大さじ1/2"}], "steps": ["れんこんを薄切りにする", "フライパンでごま油を熱し炒める", "砂糖・醤油・酒で調味"]}], "緑茶": [{"title": "緑茶(HOT)", "time": "約5分", "src": "delishkitchen.tv/recipes/375469891957817785", "ingredients": [{"item": "緑茶(茶葉)", "amount": "小さじ1"}, {"item": "熱湯", "amount": "200ml"}], "steps": ["急須に茶葉を入れる", "熱湯を注ぐ", "30秒〜1分で湯のみに注ぐ"]}], "あさり": [{"title": "あさりのバター醤油酒蒸し", "time": "約10分", "src": "marinfood.co.jp/restaurant/kondate/fish/post-504.html", "ingredients": [{"item": "あさり", "amount": "300g"}, {"item": "えのき", "amount": "1/2袋"}, {"item": "酒", "amount": "50ml"}, {"item": "バター", "amount": "15g"}, {"item": "醤油", "amount": "大さじ1"}], "steps": ["あさりを砂抜きし洗う", "フライパンに酒・あさり・えのきを入れる", "ふたをして中火2〜3分蒸す", "バターと醤油で調味"]}]};
+
+let currentNatureFilter = null;
+
+function getAvailableNatures(){
+  const s = new Set();
+  DATASET_DB.forEach(d => { if(d && d.nature) s.add(d.nature); });
+  return Array.from(s).sort((a,b) => NATURE_ORDER.indexOf(a) - NATURE_ORDER.indexOf(b));
 }
 
-/* DATASET_DBから自動生成用の食材プールを構成 */
-const ING_POOL = DATASET_DB.map(d => {
-  const natureTraits = Object.keys(NATURE_PRIORITY)
-    .filter(k => (NATURE_PRIORITY[k] || []).includes(d.nature));
-  const explicitTraits = (d.traits || []).filter(t => TRAIT_DEF[t]);
-  const constitutions = explicitTraits.length
-    ? explicitTraits
-    : (natureTraits.length ? natureTraits : Object.keys(TRAIT_DEF));
-  return {
-    name: d.name,
-    emoji: d.emoji || "🍽",
-    cat: d.cat || "other",
-    mainOk: d.cat !== "other",
-    constitutions
-  };
+function renderNatureFilter(){
+  const box = document.getElementById("natureFilter");
+  if(!box) return;
+  const natures = getAvailableNatures();
+  if(!natures.length){ box.innerHTML = ""; return; }
+  const items = ["", ...natures];
+  const html = items.map(n => {
+    const active = (currentNatureFilter||"") === n;
+    const color  = n ? NATURE_COLOR[n] : null;
+    const style  = active ? ` style="background:${color}; color:#fff; border-color:${color};"`
+                          : (color ? ` style="border-color:${color}; color:${color};"` : "");
+    const aria    = n ? n+"で絞り込み" : "絞り込み解除";
+    const label   = n || "全て";
+    return `<button type="button" class="nature-btn" role="tab"
+                    aria-selected="${active}" ${style} data-nature="${n}"
+                    aria-label="${aria}">${label}</button>`;
+  }).join("");
+  box.innerHTML = html;
+  box.querySelectorAll(".nature-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentNatureFilter = btn.dataset.nature || null;
+      renderNatureFilter();
+      renderFoodRecommend();
+    });
+  });
+}
+
+function renderFoodRecommend(){
+  const list = document.getElementById("foodChipList");
+  const empty = document.getElementById("foodEmpty");
+  if(!list || !empty) return;
+  if(!DATASET_DB.length){
+    list.innerHTML = "";
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  const traits = (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys : [];
+  let rows = DATASET_DB.filter(d => {
+    if(currentNatureFilter && d.nature !== currentNatureFilter) return false;
+    if(traits.length && !(d.traits||[]).some(t => traits.includes(t))) return false;
+    return true;
+  });
+
+  // 体質推奨順（nature）を保つ
+  if(traits.length){
+    const prio = [].concat(...traits.map(k => NATURE_PRIORITY[k]||[]));
+    rows.sort((a,b) => {
+      const ai = prio.indexOf(a.nature); const bi = prio.indexOf(b.nature);
+      return (ai<0?99:ai) - (bi<0?99:bi);
+    });
+  }
+
+  if(!rows.length){
+    list.innerHTML = `<div class="food-empty">該当する食材がありません。五性フィルタを解除してください。</div>`;
+    return;
+  }
+
+  list.innerHTML = rows.map(d => {
+    const color = NATURE_COLOR[d.nature] || "#888";
+    const rcount = (RECIPE_DB && RECIPE_DB[d.name]) ? RECIPE_DB[d.name].length : 0;
+    return `
+      <div class="food-chip" tabindex="0" role="group" data-name="${escapeHtml(d.name)}"
+           aria-label="${escapeHtml(d.name)} ${escapeHtml(d.nature||"")} レシピ${rcount}件">
+        <span class="fc-emoji">${escapeHtml(d.emoji||"")}</span>
+        <button type="button" class="fc-name-btn" data-name="${escapeHtml(d.name)}"
+                aria-label="${escapeHtml(d.name)}のレシピを表示">
+          <span class="fc-name">${escapeHtml(d.name)}</span>
+          <span class="fc-count">${rcount}レシピ</span>
+        </button>
+        <button type="button" class="fc-nature" role="tab"
+                aria-label="${escapeHtml(d.name)}の五性${escapeHtml(d.nature||"")}で絞り込む"
+                data-nature="${escapeHtml(d.nature||"")}"
+                style="background:${color}">${escapeHtml(d.nature||"-")}</button>
+      </div>`;
+  }).join("");
+
+  // 食材本体タップでレシピ絞り込み表示
+  list.querySelectorAll(".fc-name-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      showRecipesForIngredient(btn.dataset.name);
+    });
+  });
+  list.querySelectorAll(".food-chip .fc-emoji").forEach(el => {
+    el.addEventListener("click", () => {
+      const root = el.closest(".food-chip");
+      if(root) showRecipesForIngredient(root.dataset.name);
+    });
+  });
+  list.querySelectorAll(".fc-nature").forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentNatureFilter = btn.dataset.nature || null;
+      renderNatureFilter();
+      renderFoodRecommend();
+    });
+  });
+}
+
+/* 食材タップでその食材だけのレシピを表示（foodList を置換） */
+let currentIngredientFilter = null; // 食材タップでの絞り込み状態
+
+function showRecipesForIngredient(name){
+  currentIngredientFilter = name;
+  const list = document.getElementById("foodList");
+  const info = document.getElementById("recipeFilterInfo");
+  const recipes = (RECIPE_DB && RECIPE_DB[name]) || [];
+  if(!recipes.length){
+    if(info) info.innerHTML = `<span style="color:#a43030;">⚠ 「${escapeHtml(name)}」のレシピが未登録です</span>`;
+    if(list) list.innerHTML = "";
+    return;
+  }
+  if(info){
+    info.innerHTML = `<strong>${escapeHtml(name)}</strong> のおすすめレシピ ${recipes.length}件 （<a href="#" id="clearIngFilter" style="color:#666;">× 食材絞り込みを解除</a>）`;
+    const clr = document.getElementById("clearIngFilter");
+    if(clr){
+      clr.addEventListener("click",(e)=>{
+        e.preventDefault();
+        currentIngredientFilter = null;
+        renderTraitAndRecipes(currentTraitKeys, TRAIT_DEF[currentTraitKeys[0]] || null);
+      });
+    }
+  }
+  if(list){
+    list.innerHTML = recipes.map(r => renderRecipeCard({
+      id: "ing-" + name + "-" + r.title,
+      emoji: "🍳",
+      title: r.title,
+      time: r.time,
+      constitution: (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys.join("・") : "バランス",
+      ingredients: (r.ingredients||[]).map(i => ({item:i.item||"", amount:i.amount||""})).filter(i => i.item.trim()),
+      steps: r.steps || [],
+      effect: (typeof RECIPE_DB_META !== "undefined" && RECIPE_DB_META[name]) ? RECIPE_DB_META[name].effect : "",
+      cautions: "砂糖・塩・酢・醤油・味噌を基本に、ご家庭の調味料で調整してください。",
+      traitKey: (currentTraitKeys && currentTraitKeys[0]) || "balanced",
+      season: name,
+      ts: Date.now(),
+      _src: r.src
+    })).join("");
+    bindRecipeCardEvents();
+  }
+}
+
+let currentTraitKeys = []; // 現在の体質（描画中）
+
+function renderSekkiAndTraits(date){
+  const { cur } = getCurrentSekki(date);
+  const kn = SEKKI_TRAITS_BY_SEASON[cur.name] || { primary:"keistai", traits:["keistai"] };
+  // 節気カード
+  const trait = TRAIT_DEF[kn.primary];
+  const next = getCurrentSekki(date).next;
+  document.getElementById("sekkiName").textContent = cur.name;
+  const fmt = d => `${d.getMonth()+1}月${d.getDate()}日`;
+  document.getElementById("sekkiRange").textContent = `${fmt(sekkiDate(date.getFullYear(), kn.id))} 〜 ${fmt(next.date)}（次の節気: ${next.name}）`;
+  document.getElementById("sekkiDesc").textContent = `${cur.name}は「${trait.label}」の体質が傾きやすい時期。${trait.summary}`;
+
+  // 体質カード表示・レシピ生成
+  currentTraitKeys = kn.traits;
+  renderTraitAndRecipes(currentTraitKeys, trait);
+  return cur;
+}
+
+/* 体質カード＋レシピを描画 */
+function renderTraitAndRecipes(traitKeys, primaryTrait){
+  // タグ表示
+  const tags = document.getElementById("traitTags");
+  tags.innerHTML = traitKeys.map(k => `<span class="trait-tag t-primary">${TRAIT_DEF[k].label}</span>`).join("")
+    + `<span class="trait-tag t-season">${primaryTrait ? primaryTrait.season : ""}</span>`;
+
+  // 体質説明
+  const advice = traitKeys.map(k => `${TRAIT_DEF[k].label}: ${TRAIT_DEF[k].advice}`).join(" / ");
+  document.getElementById("traitAdvice").innerHTML = advice;
+
+  // レシピを3品生成（体質ごとにランダムに）
+  const season = primaryTrait ? primaryTrait.season : "spring";
+  let recipes = [];
+  traitKeys.forEach(tk => {
+    const r = generateRecipe(tk, mapSeasonKey(season));
+    recipes.push(r);
+  });
+  // 体質数が1なら追加で1〜2品ランダム生成
+  while(recipes.length < 3){
+    const extraKey = pick(traitKeys.length ? traitKeys : ["keistai"]);
+    recipes.push(generateRecipe(extraKey, mapSeasonKey(season)));
+  }
+
+  const list = document.getElementById("foodList");
+  list.innerHTML = recipes.map(renderRecipeCard).join("");
+  bindRecipeCardEvents();
+
+  // 体質別おすすめ食材（五性フィルタ込み）
+  renderNatureFilter();
+  renderFoodRecommend();
+}
+
+/* 体質→シーズンキー変換 */
+function mapSeasonKey(label){
+  if(label.includes("春")) return "spring";
+  if(label.includes("長夏")) return "summer";
+  if(label.includes("秋")) return "autumn";
+  if(label.includes("冬")) return "winter";
+  return "summer";
+}
+
+/* 節気→推奨体質マップ（簡略化: 春=気滞, 夏=湿熱, 長夏=痰湿, 秋=陰虚, 冬=陽虚） */
+const SEKKI_TRAITS_BY_SEASON = {
+  "立春":{primary:"keistai", traits:["keistai"], id:2},
+  "雨水":{primary:"keistai", traits:["keistai"], id:3},
+  "啓蟄":{primary:"keistai", traits:["keistai"], id:4},
+  "春分":{primary:"keistai", traits:["keistai"], id:5},
+  "清明":{primary:"keistai", traits:["keistai"], id:6},
+  "穀雨":{primary:"keistai", traits:["keistai","tanshitsu"], id:7},
+  "立夏":{primary:"shitsunetsu", traits:["shitsunetsu"], id:8},
+  "小満":{primary:"shitsunetsu", traits:["shitsunetsu"], id:9},
+  "芒種":{primary:"shitsunetsu", traits:["shitsunetsu"], id:10},
+  "夏至":{primary:"shitsunetsu", traits:["shitsunetsu"], id:11},
+  "小暑":{primary:"tanshitsu", traits:["tanshitsu"], id:12},
+  "大暑":{primary:"kiinkyo", traits:["kiinkyo","shitsunetsu"], id:13},
+  "立秋":{primary:"inkyo", traits:["inkyo"], id:14},
+  "処暑":{primary:"inkyo", traits:["inkyo"], id:15},
+  "白露":{primary:"inkyo", traits:["inkyo"], id:16},
+  "秋分":{primary:"inkyo", traits:["inkyo"], id:17},
+  "寒露":{primary:"inkyo", traits:["inkyo"], id:18},
+  "霜降":{primary:"inkyo", traits:["inkyo"], id:19},
+  "立冬":{primary:"yokyo", traits:["yokyo"], id:20},
+  "小雪":{primary:"yokyo", traits:["yokyo"], id:21},
+  "大雪":{primary:"yokyo", traits:["yokyo"], id:22},
+  "冬至":{primary:"yokyo", traits:["yokyo"], id:23},
+  "小寒":{primary:"yokyo", traits:["yokyo"], id:0},
+  "大寒":{primary:"yokyo", traits:["yokyo"], id:1}
+};
+
+function renderMoon(date){
+  const age=moonAge(date);
+  const kn=getMoonKnowledge(age);
+  document.getElementById("moonAge").textContent="月齢 "+age.toFixed(1);
+  document.getElementById("moonPhase").textContent=kn.phase;
+  document.getElementById("moonDesc").textContent=kn.desc;
+  drawMoon(age);
+}
+
+/* ============================================================
+   9. お気に入り（localStorage）
+   ============================================================ */
+const FAV_KEY = "sekki_favorites_v1";
+
+function loadFavorites(){
+  try{
+    const raw = localStorage.getItem(FAV_KEY);
+    if(!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  }catch(e){ return []; }
+}
+
+function saveFavorites(arr){
+  try{ localStorage.setItem(FAV_KEY, JSON.stringify(arr)); return true; }
+  catch(e){ console.warn("localStorage保存失敗", e); return false; }
+}
+
+function isFavorited(id){
+  return loadFavorites().some(r => r.id === id);
+}
+
+function toggleFavorite(id, cardEl){
+  let favs = loadFavorites();
+  const idx = favs.findIndex(r => r.id === id);
+  if(idx >= 0){
+    // 削除
+    favs.splice(idx, 1);
+    saveFavorites(favs);
+    if(cardEl){
+      const btn = cardEl.querySelector(".recipe-fav");
+      if(btn){ btn.classList.remove("is-fav"); btn.textContent = "☆ 保存"; }
+    }
+  } else {
+    // 保存: カードからレシピ全文を抽出
+    const recipe = extractRecipeFromCard(cardEl);
+    if(!recipe){ alert("レシピ情報の取得に失敗しました"); return; }
+    favs.push(recipe);
+    saveFavorites(favs);
+    if(cardEl){
+      const btn = cardEl.querySelector(".recipe-fav");
+      if(btn){ btn.classList.add("is-fav"); btn.textContent = "★ 保存中"; }
+    }
+  }
+  renderFavoritesList();
+}
+
+/* カードからレシピ全文を抽出（お気に入り保存用） */
+function extractRecipeFromCard(cardEl){
+  if(!cardEl) return null;
+  const id = cardEl.dataset.recipeId;
+  const title = cardEl.querySelector(".recipe-title")?.textContent || "";
+  const emoji = cardEl.querySelector(".recipe-emoji")?.textContent || "🍽";
+  const time = cardEl.querySelector(".recipe-time")?.textContent || "";
+  const ingredients = Array.from(cardEl.querySelectorAll(".recipe-ingredients li")).map(li => {
+    const txt = li.textContent.replace(/^・\s*/, "").trim();
+    const m = txt.match(/^(.+?)\s*…\s*(.+)$/);
+    return m ? { item:m[1].trim(), amount:m[2].trim() } : { item:txt, amount:"" };
+  });
+  const steps = Array.from(cardEl.querySelectorAll(".recipe-steps li")).map(li => li.textContent.trim());
+  const effect = cardEl.querySelector(".recipe-effect")?.textContent || "";
+  const cautions = cardEl.querySelector(".recipe-cautions")?.textContent.replace(/^⚠\s*/, "").trim() || "";
+  // 体質判定: 体質タグから
+  const tags = Array.from(document.querySelectorAll("#traitTags .trait-tag")).map(t => t.textContent);
+  const constitution = tags.filter(t => !["春","夏","長夏","秋","冬","夏の終わり"].includes(t)).join("・") || "";
+  return { id, title, emoji, time, ingredients, steps, effect, cautions, constitution, savedAt:new Date().toISOString() };
+}
+
+function renderFavoritesList(){
+  const container = document.getElementById("favList");
+  const favs = loadFavorites();
+  if(favs.length === 0){
+    container.innerHTML = `<div class="fav-empty">まだお気に入りレシピはありません。<br>レシピカードの「☆ 保存」を押すと、ここに追加されます。</div>`;
+    return;
+  }
+  // 保存日時の降順
+  favs.sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
+  container.innerHTML = favs.map((r, idx) => `
+    <div class="fav-item" data-fav-idx="${idx}">
+      <div class="fav-item-title">${escapeHtml(r.emoji)} ${escapeHtml(r.title)}</div>
+      <div class="fav-item-meta">
+        体質: ${escapeHtml(r.constitution || "—")} / ${escapeHtml(r.time || "")}<br>
+        保存: ${(r.savedAt||"").slice(0,16).replace("T"," ")}
+      </div>
+      <div class="fav-item-actions">
+        <button type="button" class="btn small" data-action="view" data-idx="${idx}">詳細</button>
+        <button type="button" class="btn small ghost" data-action="del" data-idx="${idx}">削除</button>
+      </div>
+    </div>
+  `).join("");
+  container.querySelectorAll('[data-action="del"]').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const i = +btn.dataset.idx;
+      const favs2 = loadFavorites().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
+      favs2.splice(i,1);
+      saveFavorites(favs2);
+      renderFavoritesList();
+      // 表示中のカードのボタンも更新
+      document.querySelectorAll(".recipe-fav").forEach(b => {
+        const fid = b.dataset.favId;
+        const stillFav = loadFavorites().some(x => x.id === fid);
+        if(stillFav){ b.classList.add("is-fav"); b.textContent="★ 保存中"; }
+        else { b.classList.remove("is-fav"); b.textContent="☆ 保存"; }
+      });
+    });
+  });
+  container.querySelectorAll('[data-action="view"]').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const i = +btn.dataset.idx;
+      const favs2 = loadFavorites().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
+      const r = favs2[i];
+      if(!r) return;
+      // モーダル的にalertで表示（簡単に実装）
+      let txt = `${r.emoji} ${r.title}\n\n`;
+      txt += `【材料（2人分）】\n`;
+      r.ingredients.forEach(i => txt += `・${i.item} … ${i.amount}\n`);
+      txt += `\n【作り方】\n`;
+      r.steps.forEach((s, k) => txt += `${k+1}. ${s}\n`);
+      txt += `\n【中医学的な観点】\n${r.effect}\n`;
+      txt += `\n【⚠ 注意点】\n${r.cautions}`;
+      alert(txt);
+    });
+  });
+}
+
+/* ============================================================
+   10. 位置情報のUI更新
+   ============================================================ */
+function setLocUI(loc, status){
+  document.getElementById("placeName").textContent="📍 "+loc.name;
+  const ts = loc.ts ? new Date(loc.ts).toLocaleString("ja-JP", { hour12:false }) : "未取得";
+  const acc = loc.acc ? ` (±${Math.round(loc.acc)}m)` : "";
+  const el=document.getElementById("coordInfo");
+  if(status==="ok"){ el.innerHTML=`<span class="status-ok">● 取得済</span>  緯度 ${loc.lat} / 経度 ${loc.lon}${acc} / ${ts}`; document.getElementById("locError").classList.add("hidden"); }
+  else if(status==="saved"){ el.innerHTML=`<span class="status-wait">● 前回の値</span>  緯度 ${loc.lat} / 経度 ${loc.lon} / ${ts}`; }
+  else if(status==="default"){ el.innerHTML=`<span class="status-bad">● デフォルト</span>  緯度 ${loc.lat} / 経度 ${loc.lon}（自動取得できませんでした）`; }
+  else if(status==="manual"){ el.innerHTML=`<span class="status-ok">● 手動設定</span>  緯度 ${loc.lat} / 経度 ${loc.lon} / ${ts}`; }
+}
+function showWarn(msg){ const w=document.getElementById("locWarn"); w.textContent=msg; w.classList.remove("hidden"); }
+function hideWarn(){ document.getElementById("locWarn").classList.add("hidden"); }
+
+/* ============================================================
+   12. メイン処理
+   ============================================================ */
+async function main(){
+  const today = new Date();
+  document.getElementById("todayLabel").textContent = today.getFullYear()+"年"+(today.getMonth()+1)+"月"+today.getDate()+"日";
+  renderMoon(today);
+  renderSekkiAndTraits(today);
+  renderCheckQuestions();
+  renderFavoritesList();
+
+  const saved = loadSavedLoc();
+  if(saved) setLocUI(saved, "saved");
+  currentLoc = await getLocation();
+  if(currentLoc.ok){ setLocUI(currentLoc, "ok"); }
+  else if(!saved){ currentLoc = { ...DEFAULT_LOC, ok:false, isDefault:true }; setLocUI(currentLoc, "default"); showWarn("位置情報を自動取得できなかったため、東京の予報を表示しています。\nエラー: " + currentLoc.error); }
+  else { currentLoc = saved; showWarn("位置情報の再取得に失敗しましたが、前回の地点の予報を表示しています。\nエラー: " + currentLoc.error); }
+  await updateWeather();
+}
+
+async function updateWeather(){
+  try{
+    const data = await fetchWeather(currentLoc.lat, currentLoc.lon);
+    const w = data.daily;
+    const wd0 = {
+      temperature_2m_max: w.temperature_2m_max[0],
+      temperature_2m_min: w.temperature_2m_min[0],
+      relative_humidity_2m_mean: w.relative_humidity_2m_mean[0],
+      precipitation_probability_max: w.precipitation_probability_max[0],
+      wind_speed_10m_max: w.wind_speed_10m_max[0]
+    };
+    const wd1 = {
+      temperature_2m_max: w.temperature_2m_max[1],
+      temperature_2m_min: w.temperature_2m_min[1],
+      relative_humidity_2m_mean: w.relative_humidity_2m_mean[1],
+      precipitation_probability_max: w.precipitation_probability_max[1],
+      wind_speed_10m_max: w.wind_speed_10m_max[1]
+    };
+    const s0 = calcWashIndex(wd0), s1 = calcWashIndex(wd1);
+    // 配色をつける
+    function fillFor(el, score){
+      el.textContent = score;
+      el.style.color = score>=75?"#3a7d4a":score>=55?"#6a9a3a":score>=40?"#a07820":"#b04545";
+    }
+    fillFor(document.getElementById("dryScore0"), s0);
+    fillFor(document.getElementById("dryScore1"), s1);
+    document.getElementById("dryLabel0").textContent = washLabel(s0);
+    document.getElementById("dryLabel1").textContent = washLabel(s1);
+    // 説明文（時刻で残り時間アドバイスが変わる）
+    const todayDate = new Date();
+    const dateLabel = (idx)=> {
+      const d = new Date(todayDate);
+      d.setDate(d.getDate() + idx);
+      return (d.getMonth()+1) + "月" + d.getDate() + "日";
+    };
+    document.getElementById("dryDesc").textContent = washComment(s0, s1, todayDate);
+    renderWeatherDual(wd0, wd1);
+    document.getElementById("dryLoading").classList.add("hidden");
+    document.getElementById("dryContent").classList.remove("hidden");
+    document.getElementById("locError").classList.add("hidden");
+  }catch(e){
+    document.getElementById("dryLoading").textContent="天気データを取得できませんでした";
+    const err=document.getElementById("locError");
+    err.textContent="エラー: "+e.message+"（オフラインの場合は再試行してください）";
+    err.classList.remove("hidden");
+  }
+}
+
+/* ============================================================
+   13. イベント
+   ============================================================ */
+document.getElementById("refreshBtn").addEventListener("click", async ()=>{
+  hideWarn();
+  document.getElementById("coordInfo").innerHTML=`<span class="status-wait">● 位置情報を再取得中…</span>`;
+  document.getElementById("dryContent").classList.add("hidden");
+  document.getElementById("dryLoading").classList.remove("hidden");
+  document.getElementById("dryLoading").textContent="位置情報と天気データを取得中…";
+  const r = await getLocation();
+  if(r.ok){ currentLoc=r; setLocUI(r,"ok"); }
+  else{
+    const saved=loadSavedLoc();
+    if(saved){ currentLoc=saved; setLocUI(saved,"saved"); showWarn("位置情報の再取得に失敗。前回の地点を使います。\nエラー: "+r.error); }
+    else { currentLoc={...DEFAULT_LOC, ok:false, isDefault:true}; setLocUI(currentLoc,"default"); showWarn("位置情報を取得できませんでした。\nエラー: "+r.error); }
+  }
+  await updateWeather();
 });
 
-const EFFECT_TEXT = Object.fromEntries(
-  Object.entries(TRAIT_DEF).map(([k,v]) => [k, v.advice])
-);
+document.getElementById("applyManualBtn").addEventListener("click", async ()=>{
+  hideWarn();
+  const preset=document.getElementById("presetCity").value;
+  let lat,lon,name;
+  if(preset){ const [a,b,c]=preset.split(","); lat=+a; lon=+b; name=c; }
+  else { lat=+document.getElementById("latInput").value; lon=+document.getElementById("lonInput").value; name="カスタム地点"; }
+  if(!isFinite(lat)||!isFinite(lon)||lat<-90||lat>90||lon<-180||lon>180){ alert("緯度・経度を正しく入力してください"); return; }
+  const ts=new Date().toISOString();
+  const obj={lat,lon,name,ts};
+  try{ localStorage.setItem("sekki_loc", JSON.stringify(obj)); }catch(e){}
+  currentLoc=obj;
+  setLocUI(obj,"manual");
+  document.getElementById("dryContent").classList.add("hidden");
+  document.getElementById("dryLoading").classList.remove("hidden");
+  document.getElementById("dryLoading").textContent="選択地点の天気を取得中…";
+  await updateWeather();
+});
 
-/* ============================================================
-   体質セルフチェック
-   ============================================================ */
-let checkResultTraits = [];
+/* 体質セルフチェック */
+document.getElementById("checkBtn").addEventListener("click", runCheckDiagnosis);
 
-const CHECK_QUESTIONS = [
-  { text:"疲れやすい・少し動くとすぐ疲れる", scores:{qixu:2,kiinkyo:1} },
-  { text:"冷えやすい・手足が冷たい", scores:{yokyo:2,xueyu:1} },
-  { text:"のぼせ・ほてり・寝汗が気になる", scores:{inkyo:2,yinxu:2} },
-  { text:"むくみ・体が重い・頭がぼんやりする", scores:{tanshitsu:2,shitsunetsu:1} },
-  { text:"イライラ・ため息・胸や脇が張る", scores:{keistai:2,qizhi:2} },
-  { text:"肌が乾燥する・めまい・目が疲れやすい", scores:{xuexu:2,inkyo:1} },
-  { text:"便秘・口臭・尿の色が濃いことがある", scores:{shitsunetsu:2,shire:2} },
-  { text:"肩こり・生理痛・あざができやすい", scores:{xueyu:2} }
-];
+/* 体質にあったレシピ生成 */
+document.getElementById("genByCheckBtn").addEventListener("click", ()=>{
+  if(checkResultTraits.length===0){ alert("先に体質セルフチェックを行ってください"); return; }
+  currentTraitKeys = checkResultTraits;
+  const primary = TRAIT_DEF[checkResultTraits[0]];
+  const tags = document.getElementById("traitTags");
+  tags.innerHTML = checkResultTraits.map(k => `<span class="trait-tag t-primary">${TRAIT_DEF[k].label}</span>`).join("")
+    + `<span class="trait-tag t-season">${primary.season}</span>`;
+  const advice = checkResultTraits.map(k => `${TRAIT_DEF[k].label}: ${TRAIT_DEF[k].advice}`).join(" / ");
+  document.getElementById("traitAdvice").textContent = advice;
+  renderTraitAndRecipes(checkResultTraits, primary);
+  // 該当カードまでスクロール
+  document.getElementById("foodList").scrollIntoView({behavior:"smooth", block:"start"});
+});
 
-function renderCheckQuestions(){
-  const box = document.getElementById("checkQuestions");
-  if(!box) return;
-  box.innerHTML = CHECK_QUESTIONS.map((q,i)=>`
-    <div class="q-block">
-      <div class="q-title">Q${i+1}</div>
-      <div class="q-text">${escapeHtml(q.text)}</div>
-      <div class="q-options">
-        <button type="button" class="q-opt" data-q="${i}" data-score="0">気にならない</button>
-        <button type="button" class="q-opt" data-q="${i}" data-score="1">少しある</button>
-        <button type="button" class="q-opt" data-q="${i}" data-score="2">よくある</button>
-      </div>
-    </div>`).join("");
+/* 再生成 */
+document.getElementById("regenBtn").addEventListener("click", ()=>{
+  if(currentTraitKeys.length===0){ currentTraitKeys = ["keistai"]; }
+  const primary = TRAIT_DEF[currentTraitKeys[0]];
+  renderTraitAndRecipes(currentTraitKeys, primary);
+});
 
-  box.querySelectorAll(".q-opt").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const q = btn.dataset.q;
-      box.querySelectorAll(`.q-opt[data-q="${q}"]`).forEach(b=>b.classList.remove("active"));
-      btn.classList.add("active");
-    });
-  });
-}
+/* PWA manifest とアイコンを動的生成 */
+(function setupPWA(){
+  try{
+    const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192"><rect width="192" height="192" rx="42" fill="#7a9e7e"/><text x="96" y="118" font-size="88" text-anchor="middle">🧺</text></svg>`;
+    const iconUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(iconSvg)));
+    const manifest = {
+      name:"洗濯指数＆養生ナビ", short_name:"洗濯指数養生",
+      start_url:"./index.html", display:"standalone", background_color:"#eef4ee",
+      theme_color:"#7a9e7e",
+      icons:[{src:iconUrl, sizes:"192x192", type:"image/svg+xml"}]
+    };
+    const blob = new Blob([JSON.stringify(manifest)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const ml = document.getElementById("manifestLink"); if(ml) ml.href = url;
+    const ai = document.getElementById("appleIcon"); if(ai) ai.href = iconUrl;
+  }catch(e){}
+})();
 
-function runCheckDiagnosis(){
-  const box = document.getElementById("checkQuestions");
-  const result = document.getElementById("checkResult");
-  const genBtn = document.getElementById("genByCheckBtn");
-  if(!box || !result) return;
-
-  const scores = {};
-  let answered = 0;
-  CHECK_QUESTIONS.forEach((q,i)=>{
-    const active = box.querySelector(`.q-opt[data-q="${i}"].active`);
-    if(!active) return;
-    answered++;
-    const level = Number(active.dataset.score || 0);
-    Object.entries(q.scores).forEach(([k,w])=>{
-      scores[k] = (scores[k] || 0) + level*w;
-    });
-  });
-
-  if(answered===0){
-    checkResultTraits = [];
-    result.innerHTML = `
-      <div class="check-result-title">🌿 バランス型</div>
-      <div class="check-result-score">症状の選択はありません。</div>
-      <div class="check-result-desc">現在は目立った体質傾向を設定せず、季節や生活リズムに合わせた養生を表示します。</div>`;
-  }else{
-    const ranked = Object.entries(scores)
-      .filter(([,v])=>v>0)
-      .sort((a,b)=>b[1]-a[1]);
-    checkResultTraits = ranked.slice(0,3).map(([k])=>k);
-    const top = checkResultTraits[0] || "keistai";
-    const td = TRAIT_DEF[top];
-    result.innerHTML = `
-      <div class="check-result-tit
+main();
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>

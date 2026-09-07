@@ -145,6 +145,12 @@
   }
   .q-opt:active{transform:scale(.96);}
   .q-opt.active{background:var(--green); color:#fff; border-color:var(--green);}
+  .symptom-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px;}
+  .symptom-btn{font-size:12px; padding:10px 6px; border-radius:12px; border:1px solid #d8d3c8; background:#fff; color:var(--ink); cursor:pointer; font-family:inherit; font-weight:600; line-height:1.3;}
+  .symptom-btn.active{background:var(--green); color:#fff; border-color:var(--green); box-shadow:0 2px 5px rgba(90,110,90,.16);}
+  .symptom-btn:active{transform:scale(.97);}
+  @media (max-width:360px){.symptom-grid{grid-template-columns:repeat(2,1fr);}}
+
   /* 洗濯物 */
   .idx-pairs{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;}
   .idx-card{background:var(--green-light); border-radius:12px; padding:10px 6px; text-align:center;}
@@ -265,8 +271,8 @@
   <div class="card">
     <h2><span class="emoji">🔍</span> 体質セルフチェック</h2>
     <div class="check-intro">
-      気になる<strong>症状</strong>をタップ（複数選択OK）して体質傾向をチェックします。<br>
-      何も選ばなければ<strong>「症状なし（バランス型）」</strong>として診断します。結果はレシピ提案に自動で反映されます（<strong>医療診断ではありません</strong>）。
+      気になる<strong>症状</strong>をタップして選んでください（複数選択OK）。<br>
+      選んだ症状の組み合わせから体質傾向を判定し、結果をレシピ提案に反映します（<strong>医療診断ではありません</strong>）。
     </div>
     <div id="checkArea">
       <div id="checkQuestions" class="check-questions"></div>
@@ -593,57 +599,55 @@ function recipePoolForTrait(traitKey){
 function renderCheckQuestions(){
   const box=document.getElementById("checkQuestions");
   if(!box) return;
-  box.innerHTML=CHECK_QUESTIONS.map((q,qi)=>`
-    <div class="q-block">
-      <div class="q-title">${qi+1}. ${escapeHtml(q.title)}</div>
-      <div class="q-text">${escapeHtml(q.text)}</div>
-      <div class="q-options">${q.options.map((op,oi)=>`<button type="button" class="q-opt" data-q="${qi}" data-o="${oi}">${escapeHtml(op.label)}</button>`).join("")}</div>
-    </div>`).join("");
-  box.querySelectorAll(".q-opt").forEach(btn=>btn.addEventListener("click",()=>{
+  box.innerHTML=`<div class="check-intro" style="margin:0 0 6px;">症状を選択するほど、体質傾向の判定に反映されます。</div>
+    <div class="symptom-grid">${CHECK_QUESTIONS.map((q,qi)=>`
+      <button type="button" class="symptom-btn ${checkSelected.has(qi)?"active":""}" data-q="${qi}">${escapeHtml(q.label)}</button>`).join("")}</div>`;
+  box.querySelectorAll(".symptom-btn").forEach(btn=>btn.addEventListener("click",()=>{
     const q=+btn.dataset.q;
-    box.querySelectorAll(`.q-opt[data-q="${q}"]`).forEach(x=>x.classList.remove("active"));
-    btn.classList.add("active");
-    checkAnswers[q]=+btn.dataset.o;
+    if(checkSelected.has(q)) checkSelected.delete(q); else checkSelected.add(q);
+    renderCheckQuestions();
   }));
 }
 
 const CHECK_QUESTIONS=[
-  {title:"疲れ方",text:"少し動くだけで疲れやすく、休むと回復しやすいですか？",options:[
-    {label:"ない",traits:{}},{label:"少し",traits:{qixu:1}},{label:"かなり",traits:{qixu:2}}]},
-  {title:"冷え",text:"手足や腰が冷えやすく、寒さが苦手ですか？",options:[
-    {label:"ない",traits:{}},{label:"少し",traits:{yokyo:1}},{label:"かなり",traits:{yokyo:2}}]},
-  {title:"乾燥・ほてり",text:"喉や肌が乾きやすく、ほてり・寝汗が気になりますか？",options:[
-    {label:"ない",traits:{}},{label:"少し",traits:{inkyo:1}},{label:"かなり",traits:{inkyo:2}}]},
-  {title:"むくみ・重だるさ",text:"むくみや体の重だるさ、頭の重さを感じやすいですか？",options:[
-    {label:"ない",traits:{}},{label:"少し",traits:{tanshitsu:1}},{label:"かなり",traits:{tanshitsu:2}}]},
-  {title:"イライラ・ため息",text:"ストレスで胸がつかえたり、ため息やイライラが出やすいですか？",options:[
-    {label:"ない",traits:{}},{label:"少し",traits:{keistai:1}},{label:"かなり",traits:{keistai:2}}]},
-  {title:"湿熱",text:"口のねばつき・口臭・肌荒れ・便秘・尿の濃さが気になりますか？",options:[
-    {label:"ない",traits:{}},{label:"少し",traits:{shitsunetsu:1}},{label:"かなり",traits:{shitsunetsu:2}}]}
+  {label:"疲れやすい",traits:{qixu:2}},
+  {label:"ほてり",traits:{inkyo:2,yinxu:1}},
+  {label:"冷え",traits:{yokyo:2}},
+  {label:"乾燥",traits:{inkyo:2,xuexu:1}},
+  {label:"むくみ",traits:{tanshitsu:2,shitsunetsu:1}},
+  {label:"咳",traits:{qixu:1,inkyo:1}},
+  {label:"イライラ",traits:{keistai:2}},
+  {label:"ため息・胸のつかえ",traits:{keistai:2}},
+  {label:"食欲がない",traits:{qixu:1,tanshitsu:1}},
+  {label:"胃もたれ",traits:{tanshitsu:2,shitsunetsu:1}},
+  {label:"便秘",traits:{shitsunetsu:1,inkyo:1}},
+  {label:"下痢・軟便",traits:{qixu:1,tanshitsu:2}},
+  {label:"目の疲れ",traits:{xuexu:2,inkyo:1}},
+  {label:"めまい",traits:{xuexu:2,qixu:1}},
+  {label:"肌荒れ",traits:{shitsunetsu:2,xuexu:1}}
 ];
-let checkAnswers=Array(CHECK_QUESTIONS.length).fill(-1);
+let checkSelected=new Set();
 let checkResultTraits=[];
 
 function runCheckDiagnosis(){
   const scores={};
   CHECK_QUESTIONS.forEach((q,i)=>{
-    const oi=checkAnswers[i]; if(oi<0) return;
-    Object.entries(q.options[oi].traits).forEach(([k,v])=>scores[k]=(scores[k]||0)+v);
+    if(!checkSelected.has(i)) return;
+    Object.entries(q.traits).forEach(([k,v])=>scores[k]=(scores[k]||0)+v);
   });
   const ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
-  checkResultTraits=ranked.length ? ranked.slice(0,3).map(x=>x[0]).filter(k=>xScore(scores,k)) : ["keistai"];
-  if(!ranked.length){ checkResultTraits=[]; }
+  checkResultTraits=ranked.length ? ranked.slice(0,3).map(x=>x[0]).filter(k=>xScore(scores,k)) : [];
   const result=document.getElementById("checkResult");
   if(result){
     if(!ranked.length){
-      result.innerHTML=`<div class="check-result-title">バランス型</div><div class="check-result-score">症状の選択がないため、今回は「症状なし（バランス型）」として扱います。</div><div class="check-result-desc">特定の体質に偏らない食事を基本に、季節と体調に合わせて調整しましょう。</div>`;
+      result.innerHTML=`<div class="check-result-title">症状なし（バランス型）</div><div class="check-result-score">症状を選択しなかったため、特定の体質に偏らない結果です。</div><div class="check-result-desc">季節・天候・その日の体調に合わせて食材を選びましょう。</div>`;
     }else{
       const top=checkResultTraits[0];
-      result.innerHTML=`<div class="check-result-title">${escapeHtml(TRAIT_DEF[top].label)}</div><div class="check-result-score">${checkResultTraits.map(k=>escapeHtml(TRAIT_DEF[k].label)+"："+scores[k]).join(" / ")}</div><div class="check-result-desc">${escapeHtml(TRAIT_DEF[top].summary)}</div>`;
+      result.innerHTML=`<div class="check-result-title">主な傾向：${escapeHtml(TRAIT_DEF[top].label)}</div><div class="check-result-score">${checkResultTraits.map(k=>escapeHtml(TRAIT_DEF[k].label)+"："+scores[k]).join(" / ")}</div><div class="check-result-desc">${escapeHtml(TRAIT_DEF[top].summary)}</div>`;
     }
     result.classList.remove("hidden");
   }
-  const gen=document.getElementById("genByCheckBtn"); if(gen) gen.style.display="block";
+  const gen=document.getElementById("genByCheckBtn"); if(gen) gen.style.display=checkResultTraits.length ? "block" : "none";
 }
 function xScore(scores,k){ return (scores[k]||0)>0; }
 
@@ -984,16 +988,18 @@ function renderFoodRecommend(){
   const traits = (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys : [];
   let rows = DATASET_DB.filter(d => {
     if(currentNatureFilter && d.nature !== currentNatureFilter) return false;
-    if(traits.length && !(d.traits||[]).some(t => traits.includes(t))) return false;
     return true;
   });
 
-  // 体質推奨順（nature）を保つ
+  // 現在の体質に合う五性を上位に並べる。
+  // DBの traits が未分類（balanced）の食材も候補から除外しない。
   if(traits.length){
     const prio = [].concat(...traits.map(k => NATURE_PRIORITY[k]||[]));
     rows.sort((a,b) => {
       const ai = prio.indexOf(a.nature); const bi = prio.indexOf(b.nature);
-      return (ai<0?99:ai) - (bi<0?99:bi);
+      const av = ai < 0 ? 99 : ai; const bv = bi < 0 ? 99 : bi;
+      if(av !== bv) return av - bv;
+      return (a.name||"").localeCompare(b.name||"", "ja");
     });
   }
 
@@ -1439,6 +1445,7 @@ document.getElementById("genByCheckBtn").addEventListener("click", ()=>{
   if(checkResultTraits.length===0){ alert("先に体質セルフチェックを行ってください"); return; }
   currentTraitKeys = checkResultTraits;
   const primary = TRAIT_DEF[checkResultTraits[0]];
+  if(!primary) return;
   const tags = document.getElementById("traitTags");
   tags.innerHTML = checkResultTraits.map(k => `<span class="trait-tag t-primary">${TRAIT_DEF[k].label}</span>`).join("")
     + `<span class="trait-tag t-season">${primary.season}</span>`;

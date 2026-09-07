@@ -1074,7 +1074,9 @@ function renderRecommendedRecipes(){
         constitution: (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys.map(k => TRAIT_DEF[k]?.label || k).join("・") : "バランス",
         ingredients: (r.ingredients||[]).map(i => ({item:i.item||"", amount:i.amount||""})).filter(i => i.item.trim()),
         steps: r.steps || [],
-        effect: (typeof RECIPE_DB_META !== "undefined" && RECIPE_DB_META[food.name]) ? RECIPE_DB_META[food.name].effect : (DATASET_DB.find(d=>d.name===food.name)?.effect || ""),
+        effect: (DATASET_DB.find(d=>d.name===food.name)?.effect || "") +
+          ((currentTraitKeys && currentTraitKeys[0] && typeof EFFECT_TEXT !== "undefined" && EFFECT_TEXT[currentTraitKeys[0]])
+            ? "。" + EFFECT_TEXT[currentTraitKeys[0]] : ""),
         cautions: "食材の体質適性を参考にしたおすすめです。体調や食習慣に合わせて量を調整してください。",
         traitKey: (currentTraitKeys && currentTraitKeys[0]) || "balanced",
         season: "",
@@ -1126,7 +1128,9 @@ function showRecipesForIngredient(name){
       constitution: (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys.join("・") : "バランス",
       ingredients: (r.ingredients||[]).map(i => ({item:i.item||"", amount:i.amount||""})).filter(i => i.item.trim()),
       steps: r.steps || [],
-      effect: (typeof RECIPE_DB_META !== "undefined" && RECIPE_DB_META[name]) ? RECIPE_DB_META[name].effect : "",
+      effect: (DATASET_DB.find(d=>d.name===name)?.effect || "") +
+        ((currentTraitKeys && currentTraitKeys[0] && typeof EFFECT_TEXT !== "undefined" && EFFECT_TEXT[currentTraitKeys[0]])
+          ? "。" + EFFECT_TEXT[currentTraitKeys[0]] : ""),
       cautions: "砂糖・塩・酢・醤油・味噌を基本に、ご家庭の調味料で調整してください。",
       traitKey: (currentTraitKeys && currentTraitKeys[0]) || "balanced",
       season: name,

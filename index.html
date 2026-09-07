@@ -108,19 +108,23 @@
   }
   .nature-btn[aria-selected="true"]{color:#fff; border-color:transparent;}
   .nature-btn:focus-visible{outline:2px solid var(--green); outline-offset:2px;}
-  .food-chips{display:flex; flex-wrap:wrap; gap:6px; min-height:8px;}
-  .food-chip{
-    display:inline-flex; align-items:center; gap:4px;
+  .food-chips{display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; min-height:8px;}
+  .food-chip{flex:0 0 auto; width:auto;}
+  .food-select-btn{
+    width:auto; min-height:0; display:inline-flex; align-items:center; justify-content:center; gap:4px;
     background:#fffbf2; border:1px solid #f0e6d2; border-radius:999px;
-    padding:5px 9px; font-size:11px; line-height:1.2;
+    padding:5px 8px; font-size:11px; line-height:1.15; cursor:pointer; color:var(--ink);
+    font-family:inherit; text-align:center; white-space:nowrap;
   }
-  .fc-emoji{font-size:13px; line-height:1;}
-  .fc-name{font-weight:600;}
-  .fc-nature{
-    font-size:10px; font-weight:700; color:#fff; border:none; border-radius:999px;
-    padding:3px 7px; cursor:pointer; font-family:inherit; line-height:1;
+  .food-select-btn .fc-name{font-weight:600; flex:0 0 auto; min-width:0;}
+  .fc-nature-badge{
+    flex:0 0 auto; font-size:9px; font-weight:700; color:#fff;
+    border-radius:999px; padding:3px 5px; line-height:1;
   }
-  .fc-nature:focus-visible{outline:2px solid #fff; outline-offset:2px;}
+  .food-select-btn:active{transform:scale(.97);}
+  .food-select-btn:focus-visible{outline:2px solid var(--green); outline-offset:2px;}
+  .fc-emoji{font-size:14px; line-height:1;}
+  .fc-name{font-weight:700;}
   .food-empty{
     background:#fdf3e7; border:1px dashed #e0c89a; border-radius:10px;
     padding:10px 12px; font-size:11.5px; color:#8a4a1a; line-height:1.7;
@@ -1029,40 +1033,20 @@ function renderFoodRecommend(){
   empty.hidden = true;
 
   list.innerHTML = rows.map(d => {
-    const color = NATURE_COLOR[d.nature] || "#888";
-    const rcount = RECIPE_DB[d.name].length;
+    const natureColor = NATURE_COLOR[d.nature] || "#888";
     return `
-      <div class="food-chip" tabindex="0" role="group" data-name="${escapeHtml(d.name)}"
-           aria-label="${escapeHtml(d.name)} ${escapeHtml(d.nature||"")} レシピ${rcount}件">
+    <div class="food-chip">
+      <button type="button" class="food-select-btn" data-name="${escapeHtml(d.name)}"
+              aria-label="${escapeHtml(d.name)}（五性 ${escapeHtml(d.nature||"不明")}）を選択してレシピを表示">
         <span class="fc-emoji">${escapeHtml(d.emoji||"")}</span>
-        <button type="button" class="fc-name-btn" data-name="${escapeHtml(d.name)}"
-                aria-label="${escapeHtml(d.name)}のレシピを表示">
-          <span class="fc-name">${escapeHtml(d.name)}</span>
-          <span class="fc-count">${rcount}レシピ</span>
-        </button>
-        <button type="button" class="fc-nature" role="tab"
-                aria-label="${escapeHtml(d.name)}の五性${escapeHtml(d.nature||"")}で絞り込む"
-                data-nature="${escapeHtml(d.nature||"")}"
-                style="background:${color}">${escapeHtml(d.nature||"-")}</button>
-      </div>`;
+        <span class="fc-name">${escapeHtml(d.name)}</span>
+        <span class="fc-nature-badge" style="background:${natureColor}">${escapeHtml(d.nature||"-")}</span>
+      </button>
+    </div>`;
   }).join("");
 
-  list.querySelectorAll(".fc-name-btn").forEach(btn => {
+  list.querySelectorAll(".food-select-btn").forEach(btn => {
     btn.addEventListener("click", () => showRecipesForIngredient(btn.dataset.name));
-  });
-  list.querySelectorAll(".food-chip .fc-emoji").forEach(el => {
-    el.addEventListener("click", () => {
-      const root = el.closest(".food-chip");
-      if(root) showRecipesForIngredient(root.dataset.name);
-    });
-  });
-  list.querySelectorAll(".fc-nature").forEach(btn => {
-    btn.addEventListener("click", () => {
-      currentNatureFilter = btn.dataset.nature || null;
-      renderNatureFilter();
-      renderFoodRecommend();
-      renderRecommendedRecipes();
-    });
   });
 }
 

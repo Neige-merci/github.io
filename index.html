@@ -640,7 +640,7 @@ function runCheckDiagnosis(){
     Object.entries(q.traits).forEach(([k,v])=>scores[k]=(scores[k]||0)+v);
   });
   const ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
-  checkResultTraits=ranked.length ? ranked.slice(0,3).map(x=>x[0]).filter(k=>xScore(scores,k)) : [];
+  checkResultTraits=ranked.length ? ranked.slice(0,3).map(x=>x[0]) : [];
   const result=document.getElementById("checkResult");
   if(result){
     if(!ranked.length){
@@ -826,10 +826,10 @@ function renderRecipeCard(r){
           <div class="recipe-section-title">🌿 中医学的な観点</div>
           <div class="recipe-effect">${escapeHtml(r.effect)}</div>
         </div>
-        <div class="recipe-section">
+        ${r.cautions ? `<div class="recipe-section">
           <div class="recipe-section-title">⚠ 注意点</div>
           <div class="recipe-cautions">${escapeHtml(r.cautions)}</div>
-        </div>
+        </div>` : ""}
       </div>
       ${genTag}
     </div>`;
@@ -995,17 +995,19 @@ function renderNatureFilter(){
 
 function getRecommendedFoodRows(){
   const traits = (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys : [];
-  let rows = DATASET_DB.filter(d => d && d.name && d.nature && RECIPE_DB && RECIPE_DB[d.name]);
+  let rows = DATASET_DB.filter(d => d && d.name && d.nature && typeof RECIPE_DB !== "undefined" && Array.isArray(RECIPE_DB[d.name]));
   if(currentNatureFilter) rows = rows.filter(d => d.nature === currentNatureFilter);
 
-  // セルフチェック結果に応じた五性だけを候補にする。
   if(traits.length){
     const prio = [];
     traits.forEach(k => (NATURE_PRIORITY[k]||[]).forEach(n => { if(!prio.includes(n)) prio.push(n); }));
-    rows = rows.filter(d => prio.includes(d.nature));
+    const preferred = rows.filter(d => prio.includes(d.nature));
+    // 体質に合う五性の食材が少ない場合でも、一覧そのものが空にならないようにする。
+    rows = preferred.length ? preferred : rows;
     rows.sort((a,b) => {
       const ai = prio.indexOf(a.nature), bi = prio.indexOf(b.nature);
-      if(ai !== bi) return ai - bi;
+      const aa = ai < 0 ? 99 : ai, bb = bi < 0 ? 99 : bi;
+      if(aa !== bb) return aa - bb;
       return (a.name||'').localeCompare(b.name||'', 'ja');
     });
   } else {
@@ -1050,56 +1052,92 @@ function renderFoodRecommend(){
   });
 }
 
+function getRecommendedRecipePool(){
+  const rows = getRecommendedFoodRows();
+  const pool = [];
+  rows.forEach(food => {
+    (RECIPE_DB[food.name]||[]).forEach((recipe, idx) => {
+      pool.push({food, recipe, idx});
+    });
+  });
+  return pool;
+}
+
+function recipeSignature(item){
+  return `${item.food.name}|${item.recipe.title}`;
+}
+
 function renderRecommendedRecipes(){
   const list = document.getElementById("foodList");
   const info = document.getElementById("recipeFilterInfo");
   if(!list) return;
-  const rows = getRecommendedFoodRows();
-  if(!rows.length){
+
+  const pool = getRecommendedRecipePool();
+  if(!pool.length){
     list.innerHTML = "";
     if(info) info.textContent = "おすすめ食材に対応するレシピがありません。";
     return;
   }
 
-  // 体質別おすすめ食材だけを使ったレシピを最大6件表示。
-  const recipes = [];
-  rows.forEach(food => {
-    (RECIPE_DB[food.name]||[]).forEach(r => {
-      if(recipes.length >= 6) return;
-      recipes.push({
-        id: "recommended-" + food.name + "-" + r.title,
-        emoji: "🍳",
-        title: r.title,
-        time: r.time,
-        constitution: (currentTraitKeys && currentTraitKeys.length) ? currentTraitKeys.map(k => TRAIT_DEF[k]?.label || k).join("・") : "バランス",
-        ingredients: (r.ingredients||[]).map(i => ({item:i.item||"", amount:i.amount||""})).filter(i => i.item.trim()),
-        steps: r.steps || [],
-        effect: (DATASET_DB.find(d=>d.name===food.name)?.effect || "") +
-          ((currentTraitKeys && currentTraitKeys[0] && typeof EFFECT_TEXT !== "undefined" && EFFECT_TEXT[currentTraitKeys[0]])
-            ? "。" + EFFECT_TEXT[currentTraitKeys[0]] : ""),
-        cautions: "食材の体質適性を参考にしたおすすめです。体調や食習慣に合わせて量を調整してください。",
-        traitKey: (currentTraitKeys && currentTraitKeys[0]) || "balanced",
-        season: "",
-        ts: Date.now(),
-        _src: r.src
-      });
-    });
-  });
+  const total = pool.length;
+  const count = Math.min(3, total);
+  const startOffset = total > count ? ((regenerationCount * count) % total) : 0;
+  const chosen = [];
+  const seen = new Set();
+
+  for(let i=0; i<total && chosen.length<count; i++){
+    const item = pool[(startOffset + i) % total];
+    const sig = recipeSignature(item);
+    if(seen.has(sig)) continue;
+    seen.add(sig);
+    chosen.push(item);
+  }
+
+  const recipes = chosen.map(item => ({
+    id: "recommended-" + item.food.name + "-" + item.recipe.title + "-" + regenerationCount,
+    emoji: item.food.emoji || "🍳",
+    title: item.recipe.title,
+    time: item.recipe.time,
+    constitution: (currentTraitKeys && currentTraitKeys.length)
+      ? currentTraitKeys.map(k => TRAIT_DEF[k]?.label || k).join("・")
+      : "バランス",
+    ingredients: (item.recipe.ingredients||[])
+      .map(i => ({item:i.item||"", amount:i.amount||""}))
+      .filter(i => i.item.trim()),
+    steps: item.recipe.steps || [],
+    effect: (item.food.effect || "") +
+      ((currentTraitKeys && currentTraitKeys[0] && EFFECT_TEXT[currentTraitKeys[0]])
+        ? "。" + EFFECT_TEXT[currentTraitKeys[0]] : ""),
+    cautions: "",
+    traitKey: (currentTraitKeys && currentTraitKeys[0]) || "balanced",
+    season: "",
+    ts: Date.now(),
+    _src: item.recipe.src
+  }));
 
   if(info){
-    const traitLabel = currentTraitKeys.length ? currentTraitKeys.map(k=>TRAIT_DEF[k]?.label||k).join("・") : "バランス型";
+    const traitLabel = currentTraitKeys.length
+      ? currentTraitKeys.map(k=>TRAIT_DEF[k]?.label||k).join("・")
+      : "バランス型";
     info.innerHTML = `<strong>${escapeHtml(traitLabel)}</strong> に合わせた食材のレシピを表示（${recipes.length}件）`;
   }
+
   currentIngredientFilter = null;
+  lastDisplayedRecipeSignatures = chosen.map(recipeSignature);
+  lastRecipeSignature = lastDisplayedRecipeSignatures[0] || "";
   list.innerHTML = recipes.map(renderRecipeCard).join("");
   bindRecipeCardEvents();
 }
 
 /* 食材タップでその食材だけのレシピを表示（foodList を置換） */
 let currentIngredientFilter = null; // 食材タップでの絞り込み状態
+let lastRecipeSignature = "";
+let lastDisplayedRecipeSignatures = [];
+let regenerationCount = 0;
 
 function showRecipesForIngredient(name){
   currentIngredientFilter = name;
+  lastRecipeSignature = "";
   const list = document.getElementById("foodList");
   const info = document.getElementById("recipeFilterInfo");
   const recipes = (RECIPE_DB && RECIPE_DB[name]) || [];
@@ -1131,7 +1169,7 @@ function showRecipesForIngredient(name){
       effect: (DATASET_DB.find(d=>d.name===name)?.effect || "") +
         ((currentTraitKeys && currentTraitKeys[0] && typeof EFFECT_TEXT !== "undefined" && EFFECT_TEXT[currentTraitKeys[0]])
           ? "。" + EFFECT_TEXT[currentTraitKeys[0]] : ""),
-      cautions: "砂糖・塩・酢・醤油・味噌を基本に、ご家庭の調味料で調整してください。",
+      cautions: "",
       traitKey: (currentTraitKeys && currentTraitKeys[0]) || "balanced",
       season: name,
       ts: Date.now(),
@@ -1154,24 +1192,44 @@ function renderSekkiAndTraits(date){
   document.getElementById("sekkiRange").textContent = `${fmt(sekkiDate(date.getFullYear(), kn.id))} 〜 ${fmt(next.date)}（次の節気: ${next.name}）`;
   document.getElementById("sekkiDesc").textContent = `${cur.name}は「${trait.label}」の体質が傾きやすい時期。${trait.summary}`;
 
-  // 体質カード表示・レシピ生成
-  currentTraitKeys = kn.traits;
-  renderTraitAndRecipes(currentTraitKeys, trait);
+  // 季節の節気情報だけを表示。
+  // おすすめ食材・レシピは「体質セルフチェック」の結果で確定させる。
   return cur;
 }
 
 /* 体質カード＋レシピを描画 */
 function renderTraitAndRecipes(traitKeys, primaryTrait){
-  // タグ表示
+  const validKeys = (Array.isArray(traitKeys) ? traitKeys : []).filter(k => TRAIT_DEF[k]);
   const tags = document.getElementById("traitTags");
-  tags.innerHTML = traitKeys.map(k => `<span class="trait-tag t-primary">${TRAIT_DEF[k].label}</span>`).join("")
-    + `<span class="trait-tag t-season">${primaryTrait ? primaryTrait.season : ""}</span>`;
+  const adviceEl = document.getElementById("traitAdvice");
+  const info = document.getElementById("recipeFilterInfo");
+  const list = document.getElementById("foodList");
 
-  // 体質説明
-  const advice = traitKeys.map(k => `${TRAIT_DEF[k].label}: ${TRAIT_DEF[k].advice}`).join(" / ");
-  document.getElementById("traitAdvice").innerHTML = advice;
+  if(!validKeys.length){
+    if(tags) tags.innerHTML = "";
+    if(adviceEl) adviceEl.textContent = "症状を選択して『結果を診断する』と、おすすめ食材とレシピが表示されます。";
+    if(info) info.textContent = "";
+    if(list) list.innerHTML = "";
+    currentIngredientFilter = null;
+    currentNatureFilter = null;
+    return;
+  }
 
+  if(tags){
+    tags.innerHTML = validKeys.map(k => `<span class="trait-tag t-primary">${escapeHtml(TRAIT_DEF[k].label)}</span>`).join("")
+      + (primaryTrait ? `<span class="trait-tag t-season">${escapeHtml(primaryTrait.season || "")}</span>` : "");
+  }
+
+  if(adviceEl){
+    adviceEl.textContent = validKeys.map(k => `${TRAIT_DEF[k].label}: ${TRAIT_DEF[k].advice}`).join(" / ");
+  }
+
+  currentTraitKeys = validKeys.slice();
   currentIngredientFilter = null;
+  currentNatureFilter = null;
+  regenerationCount = 0;
+  lastDisplayedRecipeSignatures = [];
+  lastRecipeSignature = "";
   renderNatureFilter();
   renderFoodRecommend();
   renderRecommendedRecipes();
@@ -1489,11 +1547,56 @@ document.getElementById("genByCheckBtn").addEventListener("click", ()=>{
   document.getElementById("foodList").scrollIntoView({behavior:"smooth", block:"start"});
 });
 
-/* 再生成 */
+/* 再生成：体質に合う登録レシピを順番に入れ替える */
 document.getElementById("regenBtn").addEventListener("click", ()=>{
   if(currentTraitKeys.length===0){ currentTraitKeys = ["keistai"]; }
-  const primary = TRAIT_DEF[currentTraitKeys[0]];
-  renderTraitAndRecipes(currentTraitKeys, primary);
+  regenerationCount += 1;
+
+  if(currentIngredientFilter){
+    const recipes = (RECIPE_DB && RECIPE_DB[currentIngredientFilter]) || [];
+    if(recipes.length > 1){
+      const food = DATASET_DB.find(d => d.name === currentIngredientFilter);
+      const list = document.getElementById("foodList");
+      const info = document.getElementById("recipeFilterInfo");
+      const currentIndex = recipes.findIndex(r => `${currentIngredientFilter}|${r.title}` === lastRecipeSignature);
+      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % recipes.length : 0;
+      const next = recipes[nextIndex];
+      lastRecipeSignature = `${currentIngredientFilter}|${next.title}`;
+      lastDisplayedRecipeSignatures = [lastRecipeSignature];
+
+      if(info) info.innerHTML = `<strong>${escapeHtml(currentIngredientFilter)}</strong> のレシピ（<a href="#" id="clearIngFilter" style="color:#666;">× 食材絞り込みを解除</a>）`;
+      const clr = document.getElementById("clearIngFilter");
+      if(clr) clr.addEventListener("click", e=>{
+        e.preventDefault();
+        currentIngredientFilter = null;
+        regenerationCount = 0;
+        lastDisplayedRecipeSignatures = [];
+        lastRecipeSignature = "";
+        renderRecommendedRecipes();
+      });
+      if(list){
+        list.innerHTML = renderRecipeCard({
+          id:"ing-"+currentIngredientFilter+"-"+next.title+"-"+regenerationCount,
+          emoji:(food?.emoji || "🍳"),
+          title:next.title,
+          time:next.time,
+          constitution:currentTraitKeys.map(k=>TRAIT_DEF[k]?.label||k).join("・"),
+          ingredients:(next.ingredients||[]).map(i=>({item:i.item||"",amount:i.amount||""})),
+          steps:next.steps||[],
+          effect:(food?.effect||"") + ((currentTraitKeys[0] && EFFECT_TEXT[currentTraitKeys[0]]) ? "。"+EFFECT_TEXT[currentTraitKeys[0]] : ""),
+          cautions:"",
+          traitKey:currentTraitKeys[0]||"balanced",
+          season:"",
+          ts:Date.now()
+        });
+        bindRecipeCardEvents();
+      }
+      return;
+    }
+  }
+
+  currentIngredientFilter = null;
+  renderRecommendedRecipes();
 });
 
 /* PWA manifest とアイコンを動的生成 */
